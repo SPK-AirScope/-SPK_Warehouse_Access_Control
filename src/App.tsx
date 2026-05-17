@@ -1314,6 +1314,8 @@ const Dashboard = () => {
     status: 'pending'
   });
 
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [isStamping, setIsStamping] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -1709,6 +1711,8 @@ const Dashboard = () => {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
+      const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
+      if (files.length > 0) setUploadedFiles(files);
       processFiles(e.target.files);
       e.target.value = '';
     }
@@ -1718,6 +1722,8 @@ const Dashboard = () => {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+      if (files.length > 0) setUploadedFiles(files);
       processFiles(e.dataTransfer.files);
     }
   };
@@ -2672,6 +2678,33 @@ const Dashboard = () => {
                       </div>
                     </label>
                   </div>
+
+                  {/* Stamp Download — shown after a PDF scan has been uploaded */}
+                  {uploadedFiles.length > 0 && !isAnalyzing && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {uploadedFiles.map((file, idx) => (
+                        <button
+                          key={idx}
+                          disabled={isStamping}
+                          onClick={async () => {
+                            setIsStamping(true);
+                            try {
+                              await pdfService.stampUploadedPdf(file);
+                            } catch (err) {
+                              console.error('직인 적용 실패:', err);
+                              alert('직인 적용 중 오류가 발생했습니다.');
+                            } finally {
+                              setIsStamping(false);
+                            }
+                          }}
+                          className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#E30613]/30 bg-red-50 hover:bg-red-100 text-[#E30613] text-xs font-black transition-colors disabled:opacity-50"
+                        >
+                          <Download size={13} />
+                          {isStamping ? '처리 중...' : `직인 찍어 다운로드 — ${file.name}`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Extracted Data Preview or Manual Entry */}
                   {(newApp.visitors?.length === 0 && newApp.escorts?.length === 0 && newApp.tools?.length === 0) ? (

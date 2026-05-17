@@ -1,6 +1,38 @@
 import html2pdf from 'html2pdf.js';
 import { EntryApplication } from './applicationService';
 
+async function removeWhiteBackground(imageSrc: string): Promise<Uint8Array> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.crossOrigin = 'anonymous';
+    el.onload = () => resolve(el);
+    el.onerror = reject;
+    el.src = imageSrc;
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    if (r > 200 && g > 200 && b > 200) {
+      data[i + 3] = 0;
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  return await new Promise<Uint8Array>((resolve) => {
+    canvas.toBlob((blob) => {
+      blob!.arrayBuffer().then((buf) => resolve(new Uint8Array(buf)));
+    }, 'image/png');
+  });
+}
+
 export const pdfService = {
   async downloadElementAsPdf(elementId: string, filename: string) {
     const element = document.getElementById(elementId);
@@ -69,11 +101,43 @@ export const pdfService = {
     }
   },
 
-  // Keep this for backward compatibility or as a fallback, but mark it as deprecated if it's broken
+  async stampUploadedPdf(pdfFile: File, stampSrc: string = '/1.JPG'): Promise<void> {
+    const { PDFDocument } = await import('pdf-lib');
+
+    const pdfBytes = await pdfFile.arrayBuffer();
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+
+    const stampPng = await removeWhiteBackground(stampSrc);
+    const stampImage = await pdfDoc.embedPng(stampPng);
+
+    const pages = pdfDoc.getPages();
+    const page = pages[pages.length - 1];
+    const { width, height } = page.getSize();
+
+    const sz = Math.min(width, height) * 0.13;
+    page.drawImage(stampImage, {
+      x: width - sz - 24,
+      y: 18,
+      width: sz,
+      height: sz,
+      opacity: 0.88,
+    });
+
+    const modifiedBytes = await pdfDoc.save();
+    const blob = new Blob([modifiedBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = pdfFile.name.replace(/\.pdf$/i, '_직인.pdf');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
   async generateApprovedPdf(app: EntryApplication, type: 'entry' | 'tools' = 'entry') {
      console.warn('generateApprovedPdf is deprecated. Use downloadElementAsPdf instead for better font support.');
-     // For now, let's just trigger a click on a hidden element if App.tsx sets it up
-     return ''; 
+     return '';
   }
 };
 
