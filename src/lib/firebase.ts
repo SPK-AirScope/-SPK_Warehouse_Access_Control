@@ -1,12 +1,14 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 // Use the specific firestoreDatabaseId from the config
 export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId || '(default)');
 export const auth = getAuth();
+export const storage = getStorage(app);
 
 /**
  * Validates connection to Firestore.

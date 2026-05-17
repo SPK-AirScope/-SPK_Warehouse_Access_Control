@@ -52,7 +52,8 @@ import {
 } from 'firebase/firestore';
 import { useCollection, useCollectionData, useDocumentData } from 'react-firebase-hooks/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth, db, OperationType, handleFirestoreError } from './lib/firebase';
+import { auth, db, storage, OperationType, handleFirestoreError } from './lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { aiService } from './services/aiService';
@@ -1593,7 +1594,7 @@ const Dashboard = () => {
                     <motion.div
                       key={app.id}
                       whileHover={{ x: 3 }}
-                      onClick={() => { setSelectedApp(app); setDetailViewMode('entry'); }}
+                      onClick={() => { setSelectedApp(app); setDetailViewMode('summary'); }}
                       className={cn(
                         "text-[8px] md:text-[10px] p-0.5 md:p-1.5 rounded-md md:rounded-lg border-l-2 cursor-pointer shadow-sm truncate font-bold",
                         app.status === 'approved' 
@@ -1752,6 +1753,24 @@ const Dashboard = () => {
 
   const submitApplication = async () => {
     if (!user) return;
+
+    // Upload any scanned PDFs to Firebase Storage
+    let pdfUrls: string[] = [];
+    if (uploadedFiles.length > 0) {
+      try {
+        pdfUrls = await Promise.all(
+          uploadedFiles.map(async (file) => {
+            const path = `pdfs/${user.uid}/${Date.now()}_${file.name}`;
+            const storageRef = ref(storage, path);
+            const snapshot = await uploadBytes(storageRef, file);
+            return getDownloadURL(snapshot.ref);
+          })
+        );
+      } catch (uploadErr) {
+        console.warn('파일 업로드 실패 (Firestore 저장은 계속):', uploadErr);
+      }
+    }
+
     const finalApp: Omit<EntryApplication, 'id'> = {
       applyDate: new Date().toISOString().split('T')[0],
       visitors: newApp.visitors || [],
@@ -1761,7 +1780,8 @@ const Dashboard = () => {
       applicantId: user.uid,
       applicantEmail: user.email || '',
       applicantName: newApp.applicantName || user.displayName || '',
-      signatureImage: newApp.signatureImage || ''
+      signatureImage: newApp.signatureImage || '',
+      ...(pdfUrls.length > 0 && { pdfUrls }),
     };
 
     try {
@@ -2146,9 +2166,43 @@ const Dashboard = () => {
                       )}
                     </div>
                   ) : detailViewMode === 'entry' ? (
-                    <EntryDocument app={selectedApp} id="application-document" />
+                    selectedApp.pdfUrls?.[0] ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">업로드된 출입 신청서 (스캔본)</p>
+                          <a href={selectedApp.pdfUrls[0]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-[#E30613] hover:underline flex items-center gap-1">
+                            <Download size={11} /> 원본 다운로드
+                          </a>
+                        </div>
+                        <iframe
+                          src={selectedApp.pdfUrls[0]}
+                          className="w-full rounded-2xl border border-slate-200 shadow-sm"
+                          style={{ height: '70vh' }}
+                          title="출입신청서"
+                        />
+                      </div>
+                    ) : (
+                      <EntryDocument app={selectedApp} id="application-document" />
+                    )
                   ) : (
-                    <ToolDocument app={selectedApp} id="tool-application-document" />
+                    selectedApp.pdfUrls?.[1] ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">업로드된 공구 반입 신청서 (스캔본)</p>
+                          <a href={selectedApp.pdfUrls[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-[#E30613] hover:underline flex items-center gap-1">
+                            <Download size={11} /> 원본 다운로드
+                          </a>
+                        </div>
+                        <iframe
+                          src={selectedApp.pdfUrls[1]}
+                          className="w-full rounded-2xl border border-slate-200 shadow-sm"
+                          style={{ height: '70vh' }}
+                          title="공구반입신청서"
+                        />
+                      </div>
+                    ) : (
+                      <ToolDocument app={selectedApp} id="tool-application-document" />
+                    )
                   )}
                 </div>
               </div>

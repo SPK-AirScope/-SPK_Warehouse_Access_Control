@@ -57,6 +57,7 @@ export interface EntryApplication {
   rejectedAt?: any;
   rejectedBy?: string;
   pdfUrl?: string;
+  pdfUrls?: string[];
   signatureImage?: string;
   applicantName?: string;
 }
