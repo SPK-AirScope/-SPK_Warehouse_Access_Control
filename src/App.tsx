@@ -32,19 +32,20 @@ import {
   useAuthState
 } from 'react-firebase-hooks/auth';
 import { signOut } from 'firebase/auth';
-import { 
-  collection, 
-  query, 
+import {
+  collection,
+  query,
   where,
   Timestamp,
-  orderBy, 
-  limit, 
-  addDoc, 
+  orderBy,
+  limit,
+  addDoc,
   serverTimestamp,
   doc,
   setDoc,
+  getDocs,
 } from 'firebase/firestore';
-import { useCollection, useDocumentData } from 'react-firebase-hooks/firestore';
+import { useDocumentData } from 'react-firebase-hooks/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, storage, OperationType, handleFirestoreError } from './lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -137,9 +138,28 @@ const Dashboard = () => {
   
   const roleLabel = userRole === 'super_admin' ? '최고 관리자' : userRole === 'manager' ? '관리자' : '보안요원';
 
-  const appsQuery = query(collection(db, 'applications'), orderBy('createdAt', 'desc'), limit(50));
-  const [appsSnapshot, appsLoading, appsError] = useCollection(appsQuery);
-  const applications = appsSnapshot?.docs.map(doc => ({ id: doc.id, ...doc.data() as any })) ?? [];
+  const [applications, setApplications] = useState<any[]>([]);
+  const [appsLoading, setAppsLoading] = useState(false);
+  const [appsError, setAppsError] = useState<Error | null>(null);
+
+  const loadApplications = async () => {
+    if (!user) return;
+    setAppsLoading(true);
+    setAppsError(null);
+    try {
+      const appsQuery = query(collection(db, 'applications'), orderBy('createdAt', 'desc'), limit(100));
+      const snapshot = await getDocs(appsQuery);
+      setApplications(snapshot.docs.map(d => ({ id: d.id, ...d.data() as any })));
+    } catch (err: any) {
+      setAppsError(err);
+    } finally {
+      setAppsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user) loadApplications();
+  }, [user]);
 
   const handleAdminLogin = async (id: string) => {
     const lowerId = id.toLowerCase();
@@ -1535,8 +1555,17 @@ const Dashboard = () => {
                         <p className="text-sm font-bold text-slate-400">등록된 신청 내역이 없습니다.</p>
                     </div>
                   )}
-                  {appsLoading && <div className="text-center p-20 text-slate-300 uppercase font-black tracking-widest text-xs">데이터 동기화 중...</div>}
-                  {appsError && <div className="text-center p-8 text-red-500 text-sm font-bold">데이터 로드 실패: {appsError.message}</div>}
+                  {appsLoading && <div className="text-center p-20 text-slate-300 uppercase font-black tracking-widest text-xs">데이터 불러오는 중...</div>}
+                  {appsError && (
+                    <div className="text-center p-8 space-y-3">
+                      <p className="text-red-500 text-sm font-bold">
+                        {appsError.message?.includes('Quota') || appsError.message?.includes('quota') || appsError.message?.includes('resource-exhausted')
+                          ? 'Firebase 일일 읽기 한도 초과 — 자정(태평양 시간) 이후 자동 초기화됩니다.'
+                          : `데이터 로드 실패: ${appsError.message}`}
+                      </p>
+                      <button onClick={loadApplications} className="text-xs font-bold text-indigo-600 underline">다시 시도</button>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
