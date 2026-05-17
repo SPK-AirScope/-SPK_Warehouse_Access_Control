@@ -1333,8 +1333,8 @@ const Dashboard = () => {
   const roleLabel = userRole === 'super_admin' ? '최고 관리자' : userRole === 'manager' ? '관리자' : '보안요원';
 
   const appsQuery = query(collection(db, 'applications'), orderBy('createdAt', 'desc'), limit(50));
-  const [appsSnapshot, appsLoading] = useCollection(appsQuery);
-  const applications = appsSnapshot?.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  const [appsSnapshot, appsLoading, appsError] = useCollection(appsQuery);
+  const applications = appsSnapshot?.docs.map(doc => ({ id: doc.id, ...doc.data() as any })) ?? [];
 
   const handleAdminLogin = async (id: string) => {
     const lowerId = id.toLowerCase();
@@ -1481,10 +1481,22 @@ const Dashboard = () => {
     const nextMonth = () => setCurrentMonth(addMonths(currentDate, 1));
     const prevMonth = () => setCurrentMonth(subMonths(currentDate, 1));
 
+    // Normalize date strings (e.g. "2026년 5월 17일" → "2026-05-17")
+    const normalizeDate = (raw: string): string => {
+      if (!raw) return '';
+      const korean = raw.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+      if (korean) {
+        const [, y, m, d] = korean;
+        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
+      return raw.slice(0, 10); // already ISO or truncate to date part
+    };
+
     // Group apps by date (using visitDate of the first visitor or applyDate)
     const appsByDate: Record<string, EntryApplication[]> = {};
-    applications?.forEach(app => {
-      const dateKey = app.visitors?.[0]?.visitDate || app.applyDate;
+    applications.forEach(app => {
+      const raw = app.visitors?.[0]?.visitDate || app.applyDate;
+      const dateKey = normalizeDate(raw);
       if (dateKey) {
         if (!appsByDate[dateKey]) {
           appsByDate[dateKey] = [];
@@ -1752,10 +1764,20 @@ const Dashboard = () => {
       signatureImage: newApp.signatureImage || ''
     };
 
-    await applicationService.createApplication(finalApp);
-    setView('applications');
-    setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' });
-    setUploadedFiles([]);
+    try {
+      await applicationService.createApplication(finalApp);
+      setView('applications');
+      setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' });
+      setUploadedFiles([]);
+    } catch (err: any) {
+      console.error('신청서 제출 실패:', err);
+      const msg = err?.message || String(err);
+      if (msg.includes('permission-denied') || msg.includes('insufficient permissions')) {
+        alert('제출 권한이 없습니다. 관리자에게 문의하세요.');
+      } else {
+        alert('제출에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.');
+      }
+    }
   };
 
   const handleApprove = (appId: string) => {
@@ -2621,6 +2643,7 @@ const Dashboard = () => {
                     </div>
                   )}
                   {appsLoading && <div className="text-center p-20 text-slate-300 uppercase font-black tracking-widest text-xs">데이터 동기화 중...</div>}
+                  {appsError && <div className="text-center p-8 text-red-500 text-sm font-bold">데이터 로드 실패: {appsError.message}</div>}
                 </div>
               </motion.div>
             )}
