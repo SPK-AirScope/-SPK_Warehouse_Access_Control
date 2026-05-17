@@ -143,6 +143,39 @@ const Dashboard = () => {
   const [appsLoading, setAppsLoading] = useState(false);
   const [appsError, setAppsError] = useState<Error | null>(null);
 
+  // 30일 경과 데이터 삭제 — 관리자만, 하루 1회만 실행
+  const runCleanupIfNeeded = async (currentAdminId: string | null) => {
+    const isAdmin = currentAdminId && ADMIN_IDS.includes(currentAdminId);
+    if (!isAdmin) return;
+
+    const today = new Date().toISOString().slice(0, 10); // "yyyy-MM-dd"
+    const lastRun = localStorage.getItem('spk_cleanup_date');
+    if (lastRun === today) return; // 오늘 이미 실행함
+
+    try {
+      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const oldQuery = query(
+        collection(db, 'applications'),
+        where('createdAt', '<', new Timestamp(Math.floor(thirtyDaysAgo / 1000), 0)),
+        limit(50)
+      );
+      const snapshot = await getDocs(oldQuery);
+      if (snapshot.empty) {
+        localStorage.setItem('spk_cleanup_date', today);
+        return;
+      }
+      await Promise.all(snapshot.docs.map(async (docSnap) => {
+        const data = docSnap.data() as any;
+        const paths: string[] = data.storagePaths || [];
+        await Promise.all(paths.map(p => deleteObject(ref(storage, p)).catch(() => {})));
+        await deleteDoc(doc(db, 'applications', docSnap.id)).catch(() => {});
+      }));
+      localStorage.setItem('spk_cleanup_date', today);
+    } catch {
+      // 실패해도 조용히 무시
+    }
+  };
+
   const loadApplications = async () => {
     if (!user) return;
     setAppsLoading(true);
@@ -150,25 +183,7 @@ const Dashboard = () => {
     try {
       const appsQuery = query(collection(db, 'applications'), orderBy('createdAt', 'desc'), limit(100));
       const snapshot = await getDocs(appsQuery);
-
-      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-      const live: any[] = [];
-
-      await Promise.all(snapshot.docs.map(async (docSnap) => {
-        const data = docSnap.data() as any;
-        const createdMs = data.createdAt?.toMillis?.() ?? 0;
-        if (createdMs > 0 && createdMs < thirtyDaysAgo) {
-          // Delete Storage files
-          const paths: string[] = data.storagePaths || [];
-          await Promise.all(paths.map(p => deleteObject(ref(storage, p)).catch(() => {})));
-          // Delete Firestore doc
-          await deleteDoc(doc(db, 'applications', docSnap.id)).catch(() => {});
-        } else {
-          live.push({ id: docSnap.id, ...data });
-        }
-      }));
-
-      setApplications(live);
+      setApplications(snapshot.docs.map(d => ({ id: d.id, ...d.data() as any })));
     } catch (err: any) {
       setAppsError(err);
     } finally {
@@ -177,7 +192,10 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
-    if (user) loadApplications();
+    if (user) {
+      loadApplications();
+      runCleanupIfNeeded(adminId);
+    }
   }, [user]);
 
   const handleAdminLogin = async (id: string) => {
