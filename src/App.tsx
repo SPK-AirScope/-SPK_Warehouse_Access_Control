@@ -44,11 +44,12 @@ import {
   doc,
   setDoc,
   getDocs,
+  deleteDoc,
 } from 'firebase/firestore';
 import { useDocumentData } from 'react-firebase-hooks/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, storage, OperationType, handleFirestoreError } from './lib/firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { aiService } from './services/aiService';
 import { applicationService, EntryApplication, Visitor, Tool as ToolItem } from './services/applicationService';
 import { pdfService } from './services/pdfService';
@@ -149,7 +150,25 @@ const Dashboard = () => {
     try {
       const appsQuery = query(collection(db, 'applications'), orderBy('createdAt', 'desc'), limit(100));
       const snapshot = await getDocs(appsQuery);
-      setApplications(snapshot.docs.map(d => ({ id: d.id, ...d.data() as any })));
+
+      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const live: any[] = [];
+
+      await Promise.all(snapshot.docs.map(async (docSnap) => {
+        const data = docSnap.data() as any;
+        const createdMs = data.createdAt?.toMillis?.() ?? 0;
+        if (createdMs > 0 && createdMs < thirtyDaysAgo) {
+          // Delete Storage files
+          const paths: string[] = data.storagePaths || [];
+          await Promise.all(paths.map(p => deleteObject(ref(storage, p)).catch(() => {})));
+          // Delete Firestore doc
+          await deleteDoc(doc(db, 'applications', docSnap.id)).catch(() => {});
+        } else {
+          live.push({ id: docSnap.id, ...data });
+        }
+      }));
+
+      setApplications(live);
     } catch (err: any) {
       setAppsError(err);
     } finally {
@@ -322,26 +341,34 @@ const Dashboard = () => {
     const nextMonth = () => setCurrentMonth(addMonths(currentDate, 1));
     const prevMonth = () => setCurrentMonth(subMonths(currentDate, 1));
 
-    // Normalize date strings (e.g. "2026년 5월 17일" → "2026-05-17")
-    const normalizeDate = (raw: string): string => {
+    // Normalize date strings to "yyyy-MM-dd" (handles Korean, ISO, slash formats)
+    const normalizeDate = (raw: any): string => {
       if (!raw) return '';
-      const korean = raw.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+      const s = (typeof raw === 'string' ? raw : String(raw)).trim();
+      if (!s) return '';
+      // Korean: "2026년 5월 17일"
+      const korean = s.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
       if (korean) {
         const [, y, m, d] = korean;
         return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
       }
-      return raw.slice(0, 10); // already ISO or truncate to date part
+      // ISO: "2026-05-17" or datetime
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      // Slash: "2026/05/17"
+      const slash = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+      if (slash) return `${slash[1]}-${slash[2].padStart(2, '0')}-${slash[3].padStart(2, '0')}`;
+      return '';
     };
 
-    // Group apps by date (using visitDate of the first visitor or applyDate)
+    const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+    // Group apps by date (visitDate of first visitor preferred, else applyDate)
     const appsByDate: Record<string, EntryApplication[]> = {};
     applications.forEach(app => {
       const raw = app.visitors?.[0]?.visitDate || app.applyDate;
       const dateKey = normalizeDate(raw);
-      if (dateKey) {
-        if (!appsByDate[dateKey]) {
-          appsByDate[dateKey] = [];
-        }
+      if (dateKey && ISO_RE.test(dateKey)) {
+        if (!appsByDate[dateKey]) appsByDate[dateKey] = [];
         appsByDate[dateKey].push(app);
       }
     });
@@ -607,6 +634,7 @@ const Dashboard = () => {
     if (!user) return;
 
     let pdfUrls: string[] = [];
+    let storagePaths: string[] = [];
     if (uploadedFiles.length > 0) {
       try {
         const uploadResults = await Promise.all(
@@ -615,13 +643,14 @@ const Dashboard = () => {
             const storageRef = ref(storage, path);
             const snapshot = await uploadBytes(storageRef, file);
             const url = await getDownloadURL(snapshot.ref);
-            return { url, category: fileCategories[idx] || 'entry' };
+            return { url, path, category: fileCategories[idx] || 'entry' };
           })
         );
-        const entryUrl = uploadResults.find(r => r.category === 'entry')?.url;
-        const toolsUrl = uploadResults.find(r => r.category === 'tools')?.url;
-        if (entryUrl) pdfUrls[0] = entryUrl;
-        if (toolsUrl) pdfUrls[1] = toolsUrl;
+        const entryResult = uploadResults.find(r => r.category === 'entry');
+        const toolsResult = uploadResults.find(r => r.category === 'tools');
+        if (entryResult) pdfUrls[0] = entryResult.url;
+        if (toolsResult) pdfUrls[1] = toolsResult.url;
+        storagePaths = uploadResults.map(r => r.path);
       } catch (uploadErr) {
         setUploadError('PDF 파일 업로드에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.');
         return;
@@ -639,6 +668,7 @@ const Dashboard = () => {
       applicantName: newApp.applicantName || user.displayName || '',
       signatureImage: newApp.signatureImage || '',
       ...(pdfUrls.length > 0 && { pdfUrls }),
+      ...(storagePaths.length > 0 && { storagePaths }),
     };
 
     try {
@@ -1062,6 +1092,25 @@ const Dashboard = () => {
 
               {/* Modal Footer */}
               <div className="p-8 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3 rounded-b-[2.5rem]">
+                 {/* PDF Download — left-aligned */}
+                 <Button
+                   variant="outline"
+                   className="px-6 h-12 flex items-center gap-2 mr-auto bg-white border-slate-200 text-slate-700"
+                   onClick={async () => {
+                     if (!selectedApp) return;
+                     const name = selectedApp.visitors?.[0]?.name || 'application';
+                     const date = selectedApp.applyDate || format(new Date(), 'yyyy-MM-dd');
+                     if (detailViewMode === 'tools') {
+                       await pdfService.downloadElementAsPdf('tool-application-document', `공구반입신청서_${name}_${date}.pdf`);
+                     } else {
+                       await pdfService.downloadElementAsPdf('application-document', `출입신청서_${name}_${date}.pdf`);
+                     }
+                   }}
+                 >
+                   <Download size={16} />
+                   PDF 다운로드
+                 </Button>
+
                  <Button variant="outline" className="px-8 min-w-32 h-12 bg-white" onClick={() => setSelectedApp(null)}>
                     닫기
                  </Button>
