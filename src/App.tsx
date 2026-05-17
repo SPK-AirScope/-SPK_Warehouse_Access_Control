@@ -1316,11 +1316,20 @@ const Dashboard = () => {
   });
 
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [fileCategories, setFileCategories] = useState<Record<number, 'entry' | 'tools'>>({});
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isStamping, setIsStamping] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
+  const [toasts, setToasts] = useState<Array<{id: string; message: string; type: 'success' | 'error' | 'info'}>>([]);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Date.now().toString();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+  };
 
   // RBAC Helpers
   const isSuperAdmin = user?.email === 'cloudkiss90@gmail.com' || userProfile?.role === 'super_admin';
@@ -1417,10 +1426,26 @@ const Dashboard = () => {
       title: '신규 출입 신청',
       description: `${app.visitors?.[0]?.name || '익명'} 외 ${app.visitors?.length || 0}명`,
       time: app.createdAt,
-      type: 'application',
+      type: 'application' as const,
+      app: app
+    })) || []),
+    ...(applications?.filter(app => app.status === 'approved' && app.approvedAt).map(app => ({
+      id: `approved-${app.id}`,
+      title: '출입 승인 완료',
+      description: `${app.visitors?.[0]?.name || '익명'} - 승인됨`,
+      time: app.approvedAt,
+      type: 'approved' as const,
+      app: app
+    })) || []),
+    ...(applications?.filter(app => app.status === 'rejected' && app.rejectedAt).map(app => ({
+      id: `rejected-${app.id}`,
+      title: '출입 반려 처리',
+      description: `${app.visitors?.[0]?.name || '익명'} - 반려됨`,
+      time: app.rejectedAt,
+      type: 'rejected' as const,
       app: app
     })) || [])
-  ].sort((a, b) => (b.time?.seconds || 0) - (a.time?.seconds || 0)).slice(0, 10);
+  ].sort((a, b) => (b.time?.seconds || 0) - (a.time?.seconds || 0)).slice(0, 15);
 
   // If auth is still loading, wait
   if (loading) return (
@@ -1713,9 +1738,9 @@ const Dashboard = () => {
     } catch (err: any) {
       console.error("Processing Error:", err);
       if (err.message?.includes("timeout")) {
-        alert("분석 시간이 너무 오래 걸립니다. 파일 용량을 줄이거나 다시 시도해주세요.");
+        showToast("분석 시간이 너무 오래 걸립니다. 파일 용량을 줄이거나 다시 시도해주세요.", 'error');
       } else {
-        alert("신청서 분석 중 오류가 발생했습니다. 파일 형식을 확인해주세요.");
+        showToast("신청서 분석 중 오류가 발생했습니다. 파일 형식을 확인해주세요.", 'error');
       }
     } finally {
       setIsAnalyzing(false);
@@ -1725,7 +1750,13 @@ const Dashboard = () => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
-      if (files.length > 0) setUploadedFiles(files);
+      if (files.length > 0) {
+        setUploadedFiles(files);
+        const cats: Record<number, 'entry' | 'tools'> = {};
+        files.forEach((_, i) => { cats[i] = i === 0 ? 'entry' : 'tools'; });
+        setFileCategories(cats);
+      }
+      setUploadError(null);
       processFiles(e.target.files);
       e.target.value = '';
     }
@@ -1736,7 +1767,13 @@ const Dashboard = () => {
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
-      if (files.length > 0) setUploadedFiles(files);
+      if (files.length > 0) {
+        setUploadedFiles(files);
+        const cats: Record<number, 'entry' | 'tools'> = {};
+        files.forEach((_, i) => { cats[i] = i === 0 ? 'entry' : 'tools'; });
+        setFileCategories(cats);
+      }
+      setUploadError(null);
       processFiles(e.dataTransfer.files);
     }
   };
@@ -1754,20 +1791,25 @@ const Dashboard = () => {
   const submitApplication = async () => {
     if (!user) return;
 
-    // Upload any scanned PDFs to Firebase Storage
     let pdfUrls: string[] = [];
     if (uploadedFiles.length > 0) {
       try {
-        pdfUrls = await Promise.all(
-          uploadedFiles.map(async (file) => {
+        const uploadResults = await Promise.all(
+          uploadedFiles.map(async (file, idx) => {
             const path = `pdfs/${user.uid}/${Date.now()}_${file.name}`;
             const storageRef = ref(storage, path);
             const snapshot = await uploadBytes(storageRef, file);
-            return getDownloadURL(snapshot.ref);
+            const url = await getDownloadURL(snapshot.ref);
+            return { url, category: fileCategories[idx] || 'entry' };
           })
         );
+        const entryUrl = uploadResults.find(r => r.category === 'entry')?.url;
+        const toolsUrl = uploadResults.find(r => r.category === 'tools')?.url;
+        if (entryUrl) pdfUrls[0] = entryUrl;
+        if (toolsUrl) pdfUrls[1] = toolsUrl;
       } catch (uploadErr) {
-        console.warn('파일 업로드 실패 (Firestore 저장은 계속):', uploadErr);
+        setUploadError('PDF 파일 업로드에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.');
+        return;
       }
     }
 
@@ -1793,9 +1835,9 @@ const Dashboard = () => {
       console.error('신청서 제출 실패:', err);
       const msg = err?.message || String(err);
       if (msg.includes('permission-denied') || msg.includes('insufficient permissions')) {
-        alert('제출 권한이 없습니다. 관리자에게 문의하세요.');
+        showToast('제출 권한이 없습니다. 관리자에게 문의하세요.', 'error');
       } else {
-        alert('제출에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.');
+        showToast('제출에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.', 'error');
       }
     }
   };
@@ -1809,15 +1851,15 @@ const Dashboard = () => {
     try {
       setIsProcessing(true);
       if (!user) {
-        alert('시스템 인증이 만료되었습니다. 다시 로그인해주세요.');
+        showToast('시스템 인증이 만료되었습니다. 다시 로그인해주세요.', 'error');
         handleLogout();
         return;
       }
-      
+
       await applicationService.approveApplication(appId, adminId || user.uid);
       setConfirmApproveId(null);
-      alert('신청서가 승인되었습니다.');
-      
+      showToast('신청서가 승인되었습니다.', 'success');
+
       if (selectedApp?.id === appId) {
         setSelectedApp(prev => prev ? { ...prev, status: 'approved' } : null);
       }
@@ -1833,7 +1875,7 @@ const Dashboard = () => {
           }
         }
       } catch (e) {}
-      alert(errorMsg);
+      showToast(errorMsg, 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -1848,23 +1890,22 @@ const Dashboard = () => {
     try {
       setIsProcessing(true);
       if (!user) {
-        alert('시스템 인증이 만료되었습니다. 다시 로그인해주세요.');
+        showToast('시스템 인증이 만료되었습니다. 다시 로그인해주세요.', 'error');
         handleLogout();
         return;
       }
 
-      // If it was already approved, "Cancel Approval" often means resetting it to pending
       const currentApp = applications.find(a => a.id === appId);
       if (currentApp?.status === 'approved') {
         await applicationService.updateApplicationStatus(appId, 'pending');
-        alert('승인이 취소되어 대기 상태로 변경되었습니다.');
+        showToast('승인이 취소되어 대기 상태로 변경되었습니다.', 'info');
       } else {
         await applicationService.rejectApplication(appId, adminId || user.uid);
-        alert('반려 처리되었습니다.');
+        showToast('반려 처리되었습니다.', 'success');
       }
-      
+
       setConfirmRejectId(null);
-      
+
       if (selectedApp?.id === appId) {
         setSelectedApp(prev => prev ? { ...prev, status: currentApp?.status === 'approved' ? 'pending' : 'rejected' } : null);
       }
@@ -1880,7 +1921,7 @@ const Dashboard = () => {
           }
         }
       } catch (e) {}
-      alert(errorMsg);
+      showToast(errorMsg, 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -1897,7 +1938,7 @@ const Dashboard = () => {
         setSelectedApp(null);
       }
       setConfirmDeleteId(null);
-      alert('신청서가 삭제되었습니다.');
+      showToast('신청서가 삭제되었습니다.', 'success');
     } catch (err: any) {
       console.error("DEBUG: Deletion failed:", err);
       let errorMsg = String(err.message || err);
@@ -1909,7 +1950,7 @@ const Dashboard = () => {
           }
         }
       } catch (e) {}
-      alert(errorMsg);
+      showToast(errorMsg, 'error');
     } finally {
       setIsDeleting(false);
     }
@@ -1918,11 +1959,11 @@ const Dashboard = () => {
   const handleCancelApplication = (appId: string) => {
     try {
       if (!appId) {
-        alert('삭제할 신청서 ID가 없습니다.');
+        showToast('삭제할 신청서 ID가 없습니다.', 'error');
         return;
       }
       if (!user) {
-        alert('시스템 인증이 만료되었습니다. 다시 로그인해주세요.');
+        showToast('시스템 인증이 만료되었습니다. 다시 로그인해주세요.', 'error');
         handleLogout();
         return;
       }
@@ -1932,20 +1973,17 @@ const Dashboard = () => {
     } catch (err: any) {
       console.error("Delete failed:", err);
       let message = String(err.message || err);
-      
-      // Try to parse JSON error from handleFirestoreError
+
       try {
         const parsed = JSON.parse(message);
         if (parsed.error && parsed.error.includes('permission-denied')) {
-          alert('삭제 권한이 없습니다. 관리자 권한을 확인해주세요.');
+          showToast('삭제 권한이 없습니다. 관리자 권한을 확인해주세요.', 'error');
           return;
         }
         message = parsed.error || message;
-      } catch (e) {
-        // Not JSON
-      }
+      } catch (e) {}
 
-      alert('신청서 삭제 중 오류가 발생했습니다: ' + message);
+      showToast('신청서 삭제 중 오류가 발생했습니다: ' + message, 'error');
     }
   };
 
@@ -2032,14 +2070,14 @@ const Dashboard = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-[#1A1A1A]/40 backdrop-blur-sm"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-6 bg-[#1A1A1A]/40 backdrop-blur-sm"
             onClick={() => setSelectedApp(null)}
           >
             <motion.div 
               initial={{ scale: 0.95, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-5xl max-h-[90vh] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
+              className="bg-white w-full max-w-5xl max-h-[95vh] md:max-h-[90vh] rounded-2xl md:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
@@ -2087,7 +2125,7 @@ const Dashboard = () => {
               </div>
 
               {/* Modal Content - Scrollable */}
-              <div className="flex-1 overflow-y-auto p-10 bg-slate-100/50">
+              <div className="flex-1 overflow-y-auto p-4 md:p-10 bg-slate-100/50">
                 <div className="max-w-4xl mx-auto space-y-12">
                   {detailViewMode === 'summary' ? (
                     <div className="space-y-12">
@@ -2106,16 +2144,16 @@ const Dashboard = () => {
                         
                         <h3 className="text-2xl font-black text-center mb-10 tracking-widest uppercase italic">Warehouse Entry Permit</h3>
                         
-                        <div className="grid grid-cols-4 border-2 border-[#1A1A1A] text-xs">
-                           <div className="bg-slate-100 p-3 font-black border-r-2 border-[#1A1A1A] flex items-center">신청구분</div>
-                           <div className="p-3 border-r-2 border-[#1A1A1A] flex items-center font-bold">임시출입 (공구포함)</div>
-                           <div className="bg-slate-100 p-3 font-black border-r-2 border-[#1A1A1A] flex items-center">신청일자</div>
-                           <div className="p-3 flex items-center font-bold">{selectedApp.applyDate}</div>
-                           
-                           <div className="bg-slate-100 p-3 font-black border-t-2 border-r-2 border-[#1A1A1A] flex items-center">방문업체</div>
-                           <div className="p-3 border-t-2 border-r-2 border-[#1A1A1A] flex items-center font-bold">{selectedApp.visitors?.[0]?.company || '-'}</div>
-                           <div className="bg-slate-100 p-3 font-black border-t-2 border-r-2 border-[#1A1A1A] flex items-center">방문인원</div>
-                           <div className="p-3 border-t-2 flex items-center font-bold">{selectedApp.visitors?.length || 0} 명</div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 border-2 border-[#1A1A1A] text-xs">
+                           <div className="bg-slate-100 p-2 md:p-3 font-black border-r-2 border-[#1A1A1A] flex items-center">신청구분</div>
+                           <div className="p-2 md:p-3 border-r-0 md:border-r-2 border-[#1A1A1A] flex items-center font-bold">임시출입 (공구포함)</div>
+                           <div className="bg-slate-100 p-2 md:p-3 font-black border-r-2 border-t-2 md:border-t-0 border-[#1A1A1A] flex items-center">신청일자</div>
+                           <div className="p-2 md:p-3 border-t-2 md:border-t-0 flex items-center font-bold">{selectedApp.applyDate}</div>
+
+                           <div className="bg-slate-100 p-2 md:p-3 font-black border-t-2 border-r-2 border-[#1A1A1A] flex items-center">방문업체</div>
+                           <div className="p-2 md:p-3 border-t-2 border-r-0 md:border-r-2 border-[#1A1A1A] flex items-center font-bold">{selectedApp.visitors?.[0]?.company || '-'}</div>
+                           <div className="bg-slate-100 p-2 md:p-3 font-black border-t-2 border-r-2 border-[#1A1A1A] flex items-center">방문인원</div>
+                           <div className="p-2 md:p-3 border-t-2 flex items-center font-bold">{selectedApp.visitors?.length || 0} 명</div>
                         </div>
                       </div>
 
@@ -2434,9 +2472,10 @@ const Dashboard = () => {
                            <div 
                              key={notif.id}
                              onClick={() => {
-                               if (notif.type === 'application') {
+                               if (notif.type === 'application' || notif.type === 'approved' || notif.type === 'rejected') {
                                  setSelectedApp((notif as any).app);
                                  setDetailViewMode('entry');
+                                 setView('applications');
                                }
                                setIsNotificationsOpen(false);
                              }}
@@ -2444,9 +2483,15 @@ const Dashboard = () => {
                            >
                               <div className={cn(
                                 "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-110 shadow-sm",
-                                notif.type === 'application' ? "bg-red-50 text-[#E30613]" : "bg-blue-50 text-blue-600"
+                                notif.type === 'application' ? "bg-red-50 text-[#E30613]" :
+                                notif.type === 'approved' ? "bg-emerald-50 text-emerald-600" :
+                                notif.type === 'rejected' ? "bg-orange-50 text-orange-600" :
+                                "bg-blue-50 text-blue-600"
                               )}>
-                                 {notif.type === 'application' ? <FileText size={18} /> : <AlertCircle size={18} />}
+                                 {notif.type === 'application' ? <FileText size={18} /> :
+                                  notif.type === 'approved' ? <CheckCircle size={18} /> :
+                                  notif.type === 'rejected' ? <XCircle size={18} /> :
+                                  <AlertCircle size={18} />}
                               </div>
                               <div className="flex-1 min-w-0">
                                  <p className="text-xs font-black text-slate-900 mb-0.5 truncate">{notif.title}</p>
@@ -2559,44 +2604,43 @@ const Dashboard = () => {
                         "absolute top-0 left-0 w-1 h-full transition-all group-hover:w-1.5",
                         app.status === 'approved' ? "bg-emerald-500" : app.status === 'pending' ? "bg-orange-400" : "bg-red-500"
                       )} />
-                      <div className="p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-                        <div className="flex items-center gap-6 flex-1">
-                           <div className="w-12 h-12 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center shrink-0">
+                      <div className="p-4 md:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-6">
+                        <div className="flex items-center gap-4 md:gap-6 flex-1 min-w-0">
+                           <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center shrink-0">
                               <User className="text-slate-400" size={18} />
                            </div>
-                           <div className="flex flex-col gap-0.5">
-                              <div className="flex items-center gap-3">
-                                <h3 className="font-black text-lg text-[#1A1A1A]">
+                           <div className="flex flex-col gap-0.5 min-w-0">
+                              <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+                                <h3 className="font-black text-base md:text-lg text-[#1A1A1A] truncate">
                                   {app.visitors?.[0]?.name || '익명'} {app.visitors?.length > 1 ? `외 ${app.visitors.length - 1}명` : ''}
                                 </h3>
                                 <span className={cn(
-                                  "px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest",
+                                  "px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest shrink-0",
                                   app.status === 'approved' ? "bg-emerald-50 text-emerald-600" : "bg-orange-50 text-orange-600"
                                 )}>
                                   {app.status === 'approved' ? '승인됨' : app.status === 'pending' ? '대기중' : '반려됨'}
                                 </span>
                               </div>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">
                                 {app.visitors?.[0]?.company || '소속 정보 없음'} &bull; {app.applyDate}
                               </p>
                            </div>
                         </div>
 
-                        <div className="flex items-center gap-8">
-                           <div className="text-center px-4 border-l border-slate-100 border-r">
+                        <div className="flex items-center gap-3 md:gap-8 w-full md:w-auto pl-14 md:pl-0">
+                           <div className="text-center px-3 md:px-4 border-l border-slate-100 md:border-r">
                               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">반입 공구</p>
                               <div className="flex items-center gap-2 justify-center">
                                  <Wrench size={12} className="text-[#E30613]" />
                                  <span className="font-black text-slate-900 text-sm">{app.tools?.length || 0}종</span>
                               </div>
                            </div>
-                           <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                           <div className="flex flex-wrap gap-1.5 md:gap-2" onClick={(e) => e.stopPropagation()}>
                              {app.status === 'approved' ? (
                                 <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
-                                   {/* PDF download removed per user request */}
                                    {isManager && (
-                                      <Button 
-                                        variant="outline" 
+                                      <Button
+                                        variant="outline"
                                         className="text-red-600 hover:bg-red-50 border-none ring-1 ring-red-100 text-xs"
                                         onClick={async (e) => {
                                           e.stopPropagation();
@@ -2609,18 +2653,18 @@ const Dashboard = () => {
                                 </div>
                              ) : isManager ? (
                                 <div className="flex gap-1.5">
-                                   <Button variant="primary" className="px-5 text-xs" onClick={(e) => { e.stopPropagation(); handleApprove(app.id); }}>
+                                   <Button variant="primary" className="px-3 md:px-5 text-xs" onClick={(e) => { e.stopPropagation(); handleApprove(app.id); }}>
                                       승인하기
                                    </Button>
-                                   <Button 
-                                      variant="outline" 
+                                   <Button
+                                      variant="outline"
                                       className="text-red-600 hover:bg-red-50 border-none ring-1 ring-red-100 text-xs"
                                       onClick={async (e) => {
                                         e.stopPropagation();
                                         await handleReject(app.id);
                                       }}
                                     >
-                                      승인 취소 / 반려
+                                      반려
                                    </Button>
                                 </div>
                              ) : (
@@ -2757,30 +2801,73 @@ const Dashboard = () => {
                     </label>
                   </div>
 
-                  {/* Stamp Download — shown after a PDF scan has been uploaded */}
+                  {/* Upload Error */}
+                  {uploadError && (
+                    <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-3">
+                      <AlertCircle size={18} className="text-red-500 shrink-0" />
+                      <p className="text-sm font-bold text-red-600">{uploadError}</p>
+                      <button onClick={() => setUploadError(null)} className="ml-auto text-red-400 hover:text-red-600"><X size={16} /></button>
+                    </div>
+                  )}
+
+                  {/* Uploaded Files with Category Selection */}
                   {uploadedFiles.length > 0 && !isAnalyzing && (
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-3 space-y-3">
                       {uploadedFiles.map((file, idx) => (
-                        <button
-                          key={idx}
-                          disabled={isStamping}
-                          onClick={async () => {
-                            setIsStamping(true);
-                            try {
-                              await pdfService.stampUploadedPdf(file);
-                              setUploadedFiles(prev => prev.filter((_, i) => i !== idx));
-                            } catch (err) {
-                              console.error('직인 적용 실패:', err);
-                              alert('직인 적용 중 오류가 발생했습니다.');
-                            } finally {
-                              setIsStamping(false);
-                            }
-                          }}
-                          className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#E30613]/30 bg-red-50 hover:bg-red-100 text-[#E30613] text-xs font-black transition-colors disabled:opacity-50"
-                        >
-                          <Download size={13} />
-                          {isStamping ? '처리 중...' : `직인 찍어 다운로드 — ${file.name}`}
-                        </button>
+                        <div key={idx} className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <FileText size={16} className="text-slate-400 shrink-0" />
+                            <span className="text-xs font-bold text-slate-700 truncate">{file.name}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setFileCategories(prev => ({ ...prev, [idx]: 'entry' }))}
+                              className={cn(
+                                "px-3 py-1.5 rounded-lg text-[10px] font-black transition-colors border",
+                                fileCategories[idx] === 'entry'
+                                  ? "bg-[#E30613] text-white border-[#E30613]"
+                                  : "bg-white text-slate-500 border-slate-200 hover:border-[#E30613]/50"
+                              )}
+                            >
+                              출입신청서
+                            </button>
+                            <button
+                              onClick={() => setFileCategories(prev => ({ ...prev, [idx]: 'tools' }))}
+                              className={cn(
+                                "px-3 py-1.5 rounded-lg text-[10px] font-black transition-colors border",
+                                fileCategories[idx] === 'tools'
+                                  ? "bg-[#1A1A1A] text-white border-[#1A1A1A]"
+                                  : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
+                              )}
+                            >
+                              공구리스트
+                            </button>
+                          </div>
+                          <button
+                            disabled={isStamping}
+                            onClick={async () => {
+                              setIsStamping(true);
+                              try {
+                                await pdfService.stampUploadedPdf(file);
+                                setUploadedFiles(prev => prev.filter((_, i) => i !== idx));
+                                setFileCategories(prev => {
+                                  const next = { ...prev };
+                                  delete next[idx];
+                                  return next;
+                                });
+                              } catch (err) {
+                                console.error('직인 적용 실패:', err);
+                                showToast('직인 적용 중 오류가 발생했습니다.', 'error');
+                              } finally {
+                                setIsStamping(false);
+                              }
+                            }}
+                            className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#E30613]/30 bg-red-50 hover:bg-red-100 text-[#E30613] text-xs font-black transition-colors disabled:opacity-50 shrink-0"
+                          >
+                            <Download size={13} />
+                            {isStamping ? '처리 중...' : '직인 다운로드'}
+                          </button>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -2811,11 +2898,11 @@ const Dashboard = () => {
                        </div>
                             <div className="grid grid-cols-1 gap-4">
                               {newApp.visitors.map((v, i) => (
-                                  <div key={i} className="p-8 bg-white rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden group">
+                                  <div key={i} className="p-4 md:p-8 bg-white rounded-2xl md:rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden group">
                                     <div className="absolute top-0 left-0 w-1.5 h-full bg-[#E30613]" />
-                                    <div className="flex items-start justify-between mb-6">
-                                        <div className="flex items-center gap-4">
-                                          <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center font-black text-[#E30613] text-sm shrink-0 border border-slate-100">{i+1}</div>
+                                    <div className="flex items-start justify-between mb-4 md:mb-6">
+                                        <div className="flex items-center gap-3 md:gap-4">
+                                          <div className="w-8 h-8 md:w-10 md:h-10 bg-slate-50 rounded-xl flex items-center justify-center font-black text-[#E30613] text-sm shrink-0 border border-slate-100">{i+1}</div>
                                           <div>
                                               {editingVisitor === i ? (
                                                 <input 
@@ -2857,7 +2944,7 @@ const Dashboard = () => {
                                         </div>
                                     </div>
                                     
-                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-y-6 gap-x-8">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-4 md:gap-y-6 gap-x-4 md:gap-x-8">
                                         {[
                                           { label: '생년월일', key: 'birthDate' },
                                           { label: '연락처', key: 'phone' },
@@ -2912,8 +2999,8 @@ const Dashboard = () => {
                           {(newApp.escorts && newApp.escorts.length > 0) ? (
                              <div className="space-y-4">
                                {newApp.escorts.map((escort, i) => (
-                                 <div key={i} className="p-8 bg-slate-50 rounded-3xl border border-slate-200 border-dashed relative group">
-                                    <div className="absolute top-4 right-4 flex items-center gap-2">
+                                 <div key={i} className="p-4 md:p-8 bg-slate-50 rounded-2xl md:rounded-3xl border border-slate-200 border-dashed relative group">
+                                    <div className="absolute top-3 right-3 md:top-4 md:right-4 flex items-center gap-1 md:gap-2">
                                        <button 
                                          onClick={() => setEditingEscort(editingEscort === i ? null : i)}
                                          className="p-2 text-slate-400 hover:text-[#E30613] hover:bg-white rounded-lg transition-colors border border-transparent hover:border-slate-100"
@@ -2929,7 +3016,7 @@ const Dashboard = () => {
                                          <Trash2 size={18} />
                                        </button>
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-8">
                                        <div>
                                           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">성명</p>
                                           {editingEscort === i ? (
@@ -3002,7 +3089,7 @@ const Dashboard = () => {
                        </div>
 
                        {/* Tools */}
-                       <div className="bg-[#1A1A1A] p-8 rounded-3xl overflow-hidden shadow-xl">
+                       <div className="bg-[#1A1A1A] p-4 md:p-8 rounded-2xl md:rounded-3xl overflow-hidden shadow-xl">
                           <div className="flex items-center justify-between mb-6">
                              <h3 className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em] flex items-center gap-2">
                                 <Wrench size={14} className="text-[#E30613]" />
@@ -3014,22 +3101,22 @@ const Dashboard = () => {
                              </Button>
                           </div>
                           {(newApp.tools && newApp.tools.length > 0) ? (
-                             <div className="overflow-hidden border border-white/10 rounded-2xl">
-                                <table className="w-full text-left text-xs">
+                             <div className="overflow-x-auto border border-white/10 rounded-2xl">
+                                <table className="w-full text-left text-xs min-w-[500px]">
                                    <thead className="bg-white/5 text-slate-400 uppercase font-black text-[9px] tracking-widest border-b border-white/5">
                                       <tr>
-                                         <th className="px-6 py-4">품명</th>
-                                         <th className="px-6 py-4">수량</th>
-                                         <th className="px-6 py-4">규격 및 비고</th>
-                                         <th className="px-6 py-4 w-32 text-center">작업</th>
+                                         <th className="px-3 md:px-6 py-3 md:py-4">품명</th>
+                                         <th className="px-3 md:px-6 py-3 md:py-4">수량</th>
+                                         <th className="px-3 md:px-6 py-3 md:py-4">규격 및 비고</th>
+                                         <th className="px-3 md:px-6 py-3 md:py-4 w-24 md:w-32 text-center">작업</th>
                                       </tr>
                                    </thead>
                                    <tbody className="divide-y divide-white/5">
                                       {newApp.tools.map((t, i) => (
                                          <tr key={i} className="text-white hover:bg-white/5 transition-colors group/row">
-                                            <td className="px-6 py-4">
+                                            <td className="px-3 md:px-6 py-3 md:py-4">
                                                {editingTool === i ? (
-                                                 <input 
+                                                 <input
                                                    className="bg-white/10 text-white p-1 rounded w-full outline-none focus:ring-1 focus:ring-[#E30613] placeholder:text-white/20"
                                                    value={t.name}
                                                    onChange={(e) => handleUpdateTool(i, { name: e.target.value })}
@@ -3039,16 +3126,16 @@ const Dashboard = () => {
                                                  <span className="font-black">{t.name || '품명 미상'}</span>
                                                )}
                                             </td>
-                                            <td className="px-6 py-4">
+                                            <td className="px-3 md:px-6 py-3 md:py-4">
                                                {editingTool === i ? (
                                                  <div className="flex gap-1 items-center">
-                                                   <input 
+                                                   <input
                                                      className="bg-white/10 text-white p-1 rounded w-12 outline-none focus:ring-1 focus:ring-[#E30613]"
                                                      type="number"
                                                      value={t.quantity}
                                                      onChange={(e) => handleUpdateTool(i, { quantity: parseInt(e.target.value) || 0 })}
                                                    />
-                                                   <input 
+                                                   <input
                                                      className="bg-white/10 text-white p-1 rounded w-12 outline-none focus:ring-1 focus:ring-[#E30613]"
                                                      value={t.unit}
                                                      onChange={(e) => handleUpdateTool(i, { unit: e.target.value })}
@@ -3058,9 +3145,9 @@ const Dashboard = () => {
                                                  <span className="font-bold text-[#E30613]">{t.quantity} {t.unit}</span>
                                                )}
                                             </td>
-                                            <td className="px-6 py-4">
+                                            <td className="px-3 md:px-6 py-3 md:py-4">
                                                {editingTool === i ? (
-                                                 <input 
+                                                 <input
                                                    className="bg-white/10 text-white p-1 rounded w-full outline-none focus:ring-1 focus:ring-[#E30613] placeholder:text-white/20"
                                                    value={t.spec || t.note || ''}
                                                    onChange={(e) => handleUpdateTool(i, { spec: e.target.value })}
@@ -3070,7 +3157,7 @@ const Dashboard = () => {
                                                  <span className="text-white/50 italic">{t.spec || t.note || '-'}</span>
                                                )}
                                             </td>
-                                            <td className="px-6 py-4">
+                                            <td className="px-3 md:px-6 py-3 md:py-4">
                                                <div className="flex items-center justify-center gap-2 opacity-30 group-hover/row:opacity-100 transition-opacity">
                                                  <button 
                                                    onClick={() => setEditingTool(editingTool === i ? null : i)}
@@ -3176,6 +3263,44 @@ const Dashboard = () => {
           )}
         </div>
       </main>
+
+      {/* Toast notifications */}
+      <div className="fixed bottom-6 right-6 z-[200] flex flex-col gap-3 pointer-events-none">
+        <AnimatePresence>
+          {toasts.map(toast => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, y: 20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.95 }}
+              className={cn(
+                "pointer-events-auto px-5 py-3.5 rounded-2xl shadow-2xl border flex items-center gap-3 min-w-[280px] max-w-sm",
+                toast.type === 'success' ? "bg-emerald-50 border-emerald-200 text-emerald-800" :
+                toast.type === 'error' ? "bg-red-50 border-red-200 text-red-800" :
+                "bg-blue-50 border-blue-200 text-blue-800"
+              )}
+            >
+              <div className={cn(
+                "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                toast.type === 'success' ? "bg-emerald-100" :
+                toast.type === 'error' ? "bg-red-100" :
+                "bg-blue-100"
+              )}>
+                {toast.type === 'success' ? <CheckCircle size={16} /> :
+                 toast.type === 'error' ? <XCircle size={16} /> :
+                 <Info size={16} />}
+              </div>
+              <p className="text-xs font-bold leading-tight">{toast.message}</p>
+              <button
+                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                className="ml-auto text-current opacity-40 hover:opacity-100 transition-opacity"
+              >
+                <X size={14} />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
     </div>
   );
 };
