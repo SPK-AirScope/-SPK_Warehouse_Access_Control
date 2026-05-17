@@ -1755,6 +1755,7 @@ const Dashboard = () => {
     await applicationService.createApplication(finalApp);
     setView('applications');
     setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' });
+    setUploadedFiles([]);
   };
 
   const handleApprove = (appId: string) => {
@@ -2690,6 +2691,7 @@ const Dashboard = () => {
                             setIsStamping(true);
                             try {
                               await pdfService.stampUploadedPdf(file);
+                              setUploadedFiles(prev => prev.filter((_, i) => i !== idx));
                             } catch (err) {
                               console.error('직인 적용 실패:', err);
                               alert('직인 적용 중 오류가 발생했습니다.');
