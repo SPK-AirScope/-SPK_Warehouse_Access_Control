@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "EntryApplication": {
+      "title": "Entry Application",
+      "description": "Application for warehouse entry, including personnel and tools.",
+      "type": "object",
+      "properties": {
+        "applyDate": { "type": "string", "format": "date" },
+        "visitors": { 
+          "type": "array", 
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "birthDate": { "type": "string" },
+              "company": { "type": "string" },
+              "phone": { "type": "string" },
+              "purpose": { "type": "string" },
+              "visitDate": { "type": "string" }
+            }
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "quantity": { "type": "number" },
+              "unit": { "type": "string" },
+              "spec": { "type": "string" },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "applicantId": { "type": "string" },
+        "applicantEmail": { "type": "string" },
+        "approvedAt": { "type": "string", "format": "date-time" },
+        "approvedBy": { "type": "string" },
+        "pdfUrl": { "type": "string", "description": "URL or storage path for the generated PDF" }
+      },
+      "required": ["applyDate", "visitors", "status", "applicantId"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User roles: manager (approves) or guard (views/verifies).",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["manager", "guard"] },
+        "email": { "type": "string" }
+      },
+      "required": ["name", "role", "email"]
+    },
+    "Message": {
+      "title": "Chat Message",
+      "description": "Real-time communication between staff.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "senderId", "senderName"]
+    }
+  },
+  "firestore": {
+    "applications": {
+      "schema": "EntryApplication",
+      "description": "Entry permitting requests"
+    },
+    "users": {
+      "schema": "UserProfile",
+      "description": "Personnel profiles"
+    },
+    "messages": {
+      "schema": "Message",
+      "description": "Operational chat messages"
+    }
+  }
+}
