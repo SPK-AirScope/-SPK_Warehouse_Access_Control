@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Shield,
   LogOut,
@@ -80,6 +80,7 @@ import { AdminsManagementView } from './components/AdminsManagementView';
 // Set worker for pdfjs
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
+
 const Dashboard = () => {
   const [user, loading] = useAuthState(auth);
   const [loginError, setLoginError] = useState<React.ReactNode>('');
@@ -134,7 +135,7 @@ const Dashboard = () => {
   const canWriteData = roleLevel <= 2;
   const isManager = roleLevel <= 2;
   
-  const roleLabel = userRole === 'super_admin' ? '理쒓퀬 愿由ъ옄' : userRole === 'manager' ? '愿由ъ옄' : '蹂댁븞?붿썝';
+  const roleLabel = userRole === 'super_admin' ? '최고 관리자' : userRole === 'manager' ? '관리자' : '보안요원';
 
   const appsQuery = query(collection(db, 'applications'), orderBy('createdAt', 'desc'), limit(50));
   const [appsSnapshot, appsLoading, appsError] = useCollection(appsQuery);
@@ -189,7 +190,7 @@ const Dashboard = () => {
         if (userProfile?.role !== targetRole) {
           try {
             await setDoc(doc(db, 'users', user.uid), {
-              name: adminId ? (adminId === 'spkgase' ? '愿由ъ옄 (spkgase)' : '蹂댁븞?붿썝 (wu001)') : (isSuperAdminUser ? '理쒓퀬 愿由ъ옄' : user.displayName || email.split('@')[0]),
+              name: adminId ? (adminId === 'spkgase' ? '관리자 (spkgase)' : '보안요원 (wu001)') : (isSuperAdminUser ? '최고 관리자' : user.displayName || email.split('@')[0]),
               adminId: adminId || null,
               email: email || null,
               role: targetRole,
@@ -217,24 +218,24 @@ const Dashboard = () => {
   const notifications = [
     ...(applications?.filter(app => app.status === 'pending').map(app => ({
       id: `app-${app.id}`,
-      title: '?좉퇋 異쒖엯 ?좎껌',
-      description: `${app.visitors?.[0]?.name || '?듬챸'} ??${app.visitors?.length || 0}紐?,
+      title: '신규 출입 신청',
+      description: `${app.visitors?.[0]?.name || '익명'} 외 ${app.visitors?.length || 0}명`,
       time: app.createdAt,
       type: 'application' as const,
       app: app
     })) || []),
     ...(applications?.filter(app => app.status === 'approved' && app.approvedAt).map(app => ({
       id: `approved-${app.id}`,
-      title: '異쒖엯 ?뱀씤 ?꾨즺',
-      description: `${app.visitors?.[0]?.name || '?듬챸'} - ?뱀씤??,
+      title: '출입 승인 완료',
+      description: `${app.visitors?.[0]?.name || '익명'} - 승인됨`,
       time: app.approvedAt,
       type: 'approved' as const,
       app: app
     })) || []),
     ...(applications?.filter(app => app.status === 'rejected' && app.rejectedAt).map(app => ({
       id: `rejected-${app.id}`,
-      title: '異쒖엯 諛섎젮 泥섎━',
-      description: `${app.visitors?.[0]?.name || '?듬챸'} - 諛섎젮??,
+      title: '출입 반려 처리',
+      description: `${app.visitors?.[0]?.name || '익명'} - 반려됨`,
       time: app.rejectedAt,
       type: 'rejected' as const,
       app: app
@@ -301,10 +302,10 @@ const Dashboard = () => {
     const nextMonth = () => setCurrentMonth(addMonths(currentDate, 1));
     const prevMonth = () => setCurrentMonth(subMonths(currentDate, 1));
 
-    // Normalize date strings (e.g. "2026??5??17?? ??"2026-05-17")
+    // Normalize date strings (e.g. "2026년 5월 17일" → "2026-05-17")
     const normalizeDate = (raw: string): string => {
       if (!raw) return '';
-      const korean = raw.match(/(\d{4})??s*(\d{1,2})??s*(\d{1,2})??);
+      const korean = raw.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
       if (korean) {
         const [, y, m, d] = korean;
         return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
@@ -335,7 +336,7 @@ const Dashboard = () => {
             </div>
             <div>
               <h2 className="text-lg md:text-xl font-black text-[#1A1A1A] tracking-tight">
-                {format(currentDate, 'yyyy??M??, { locale: ko })}
+                {format(currentDate, 'yyyy년 M월', { locale: ko })}
               </h2>
               <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Entry Schedule Management</p>
             </div>
@@ -352,7 +353,7 @@ const Dashboard = () => {
               onClick={() => setCurrentMonth(new Date())}
               className="px-3 md:px-4 py-1.5 md:py-2 text-[10px] md:text-[11px] font-black uppercase tracking-wider text-slate-600 hover:bg-slate-50 rounded-lg md:rounded-xl"
             >
-              ?ㅻ뒛
+              오늘
             </button>
             <button 
               onClick={nextMonth}
@@ -365,7 +366,7 @@ const Dashboard = () => {
 
         {/* Days of week */}
         <div className="grid grid-cols-7 border-b border-slate-100 bg-white">
-          {['??, '??, '??, '??, '紐?, '湲?, '??].map((day, i) => (
+          {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
             <div 
               key={day} 
               className={cn(
@@ -373,7 +374,7 @@ const Dashboard = () => {
                 i === 0 ? "text-red-500" : i === 6 ? "text-blue-500" : "text-slate-400"
               )}
             >
-              <span className="hidden sm:inline">{day}?붿씪</span>
+              <span className="hidden sm:inline">{day}요일</span>
               <span className="inline sm:hidden">{day}</span>
             </div>
           ))}
@@ -423,12 +424,12 @@ const Dashboard = () => {
                             : "bg-red-50 border-red-500 text-red-700"
                       )}
                     >
-                      {app.visitors?.[0]?.name || '?듬챸'}
+                      {app.visitors?.[0]?.name || '익명'}
                     </motion.div>
                   ))}
                   {dayApps.length > 3 && (
                     <div className="text-[8px] text-slate-400 font-bold pl-1">
-                      +{dayApps.length - 3} ?붾낫湲?
+                      +{dayApps.length - 3} 더보기
                     </div>
                   )}
                 </div>
@@ -448,11 +449,11 @@ const Dashboard = () => {
         birthDate: '', 
         company: '', 
         phone: '', 
-        badgeType: '?꾩떆', 
+        badgeType: '임시', 
         receiptNo: '', 
-        accessZone: '李쎄퀬', 
+        accessZone: '창고', 
         visitDate: new Date().toISOString().split('T')[0], 
-        purpose: '?낅Т', 
+        purpose: '업무', 
         remarks: '' 
       }]
     }));
@@ -532,9 +533,9 @@ const Dashboard = () => {
     } catch (err: any) {
       console.error("Processing Error:", err);
       if (err.message?.includes("timeout")) {
-        showToast("遺꾩꽍 ?쒓컙???덈Т ?ㅻ옒 嫄몃┰?덈떎. ?뚯씪 ?⑸웾??以꾩씠嫄곕굹 ?ㅼ떆 ?쒕룄?댁＜?몄슂.", 'error');
+        showToast("분석 시간이 너무 오래 걸립니다. 파일 용량을 줄이거나 다시 시도해주세요.", 'error');
       } else {
-        showToast("?좎껌??遺꾩꽍 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎. ?뚯씪 ?뺤떇???뺤씤?댁＜?몄슂.", 'error');
+        showToast("신청서 분석 중 오류가 발생했습니다. 파일 형식을 확인해주세요.", 'error');
       }
     } finally {
       setIsAnalyzing(false);
@@ -602,7 +603,7 @@ const Dashboard = () => {
         if (entryUrl) pdfUrls[0] = entryUrl;
         if (toolsUrl) pdfUrls[1] = toolsUrl;
       } catch (uploadErr) {
-        setUploadError('PDF ?뚯씪 ?낅줈?쒖뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅽ듃?뚰겕 ?곹깭瑜??뺤씤?섍퀬 ?ㅼ떆 ?쒕룄?댁＜?몄슂.');
+        setUploadError('PDF 파일 업로드에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.');
         return;
       }
     }
@@ -626,12 +627,12 @@ const Dashboard = () => {
       setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' });
       setUploadedFiles([]);
     } catch (err: any) {
-      console.error('?좎껌???쒖텧 ?ㅽ뙣:', err);
+      console.error('신청서 제출 실패:', err);
       const msg = err?.message || String(err);
       if (msg.includes('permission-denied') || msg.includes('insufficient permissions')) {
-        showToast('?쒖텧 沅뚰븳???놁뒿?덈떎. 愿由ъ옄?먭쾶 臾몄쓽?섏꽭??', 'error');
+        showToast('제출 권한이 없습니다. 관리자에게 문의하세요.', 'error');
       } else {
-        showToast('?쒖텧???ㅽ뙣?덉뒿?덈떎. ?ㅽ듃?뚰겕 ?곹깭瑜??뺤씤?섍퀬 ?ㅼ떆 ?쒕룄?댁＜?몄슂.', 'error');
+        showToast('제출에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.', 'error');
       }
     }
   };
@@ -645,27 +646,27 @@ const Dashboard = () => {
     try {
       setIsProcessing(true);
       if (!user) {
-        showToast('?쒖뒪???몄쬆??留뚮즺?섏뿀?듬땲?? ?ㅼ떆 濡쒓렇?명빐二쇱꽭??', 'error');
+        showToast('시스템 인증이 만료되었습니다. 다시 로그인해주세요.', 'error');
         handleLogout();
         return;
       }
 
       await applicationService.approveApplication(appId, adminId || user.uid);
       setConfirmApproveId(null);
-      showToast('?좎껌?쒓? ?뱀씤?섏뿀?듬땲??', 'success');
+      showToast('신청서가 승인되었습니다.', 'success');
 
       if (selectedApp?.id === appId) {
         setSelectedApp(prev => prev ? { ...prev, status: 'approved' } : null);
       }
     } catch (err: any) {
       console.error("Approve failed:", err);
-      let errorMsg = "?뱀씤 泥섎━???ㅽ뙣?덉뒿?덈떎. 沅뚰븳???뺤씤?댁＜?몄슂.";
+      let errorMsg = "승인 처리에 실패했습니다. 권한을 확인해주세요.";
       try {
         const errStr = String(err.message || err);
         if (errStr.includes('{')) {
           const parsed = JSON.parse(errStr.substring(errStr.indexOf('{')));
           if (parsed.error && (parsed.error.includes('permission-denied') || parsed.error.includes('insufficient permissions'))) {
-            errorMsg = "?뱀씤 沅뚰븳???놁뒿?덈떎. 愿由ъ옄 怨꾩젙?쇰줈 濡쒓렇?명빐二쇱꽭??";
+            errorMsg = "승인 권한이 없습니다. 관리자 계정으로 로그인해주세요.";
           }
         }
       } catch (e) {}
@@ -684,7 +685,7 @@ const Dashboard = () => {
     try {
       setIsProcessing(true);
       if (!user) {
-        showToast('?쒖뒪???몄쬆??留뚮즺?섏뿀?듬땲?? ?ㅼ떆 濡쒓렇?명빐二쇱꽭??', 'error');
+        showToast('시스템 인증이 만료되었습니다. 다시 로그인해주세요.', 'error');
         handleLogout();
         return;
       }
@@ -692,10 +693,10 @@ const Dashboard = () => {
       const currentApp = applications.find(a => a.id === appId);
       if (currentApp?.status === 'approved') {
         await applicationService.updateApplicationStatus(appId, 'pending');
-        showToast('?뱀씤??痍⑥냼?섏뼱 ?湲??곹깭濡?蹂寃쎈릺?덉뒿?덈떎.', 'info');
+        showToast('승인이 취소되어 대기 상태로 변경되었습니다.', 'info');
       } else {
         await applicationService.rejectApplication(appId, adminId || user.uid);
-        showToast('諛섎젮 泥섎━?섏뿀?듬땲??', 'success');
+        showToast('반려 처리되었습니다.', 'success');
       }
 
       setConfirmRejectId(null);
@@ -705,13 +706,13 @@ const Dashboard = () => {
       }
     } catch (err: any) {
       console.error("Reject failed:", err);
-      let errorMsg = "泥섎━???ㅽ뙣?덉뒿?덈떎. 沅뚰븳???뺤씤?댁＜?몄슂.";
+      let errorMsg = "처리에 실패했습니다. 권한을 확인해주세요.";
       try {
         const errStr = String(err.message || err);
         if (errStr.includes('{')) {
           const parsed = JSON.parse(errStr.substring(errStr.indexOf('{')));
           if (parsed.error && (parsed.error.includes('permission-denied') || parsed.error.includes('insufficient permissions'))) {
-            errorMsg = "泥섎━ 沅뚰븳???놁뒿?덈떎. 愿由ъ옄 怨꾩젙?쇰줈 濡쒓렇?명빐二쇱꽭??";
+            errorMsg = "처리 권한이 없습니다. 관리자 계정으로 로그인해주세요.";
           }
         }
       } catch (e) {}
@@ -732,7 +733,7 @@ const Dashboard = () => {
         setSelectedApp(null);
       }
       setConfirmDeleteId(null);
-      showToast('?좎껌?쒓? ??젣?섏뿀?듬땲??', 'success');
+      showToast('신청서가 삭제되었습니다.', 'success');
     } catch (err: any) {
       console.error("DEBUG: Deletion failed:", err);
       let errorMsg = String(err.message || err);
@@ -740,7 +741,7 @@ const Dashboard = () => {
         if (errorMsg.includes('{')) {
           const parsed = JSON.parse(errorMsg.substring(errorMsg.indexOf('{')));
           if (parsed.error && (parsed.error.includes('permission-denied') || parsed.error.includes('insufficient permissions'))) {
-            errorMsg = "??젣 沅뚰븳???놁뒿?덈떎. (愿由ъ옄 ?먮뒗 蹂몄씤留?媛??";
+            errorMsg = "삭제 권한이 없습니다. (관리자 또는 본인만 가능)";
           }
         }
       } catch (e) {}
@@ -753,11 +754,11 @@ const Dashboard = () => {
   const handleCancelApplication = (appId: string) => {
     try {
       if (!appId) {
-        showToast('??젣???좎껌??ID媛 ?놁뒿?덈떎.', 'error');
+        showToast('삭제할 신청서 ID가 없습니다.', 'error');
         return;
       }
       if (!user) {
-        showToast('?쒖뒪???몄쬆??留뚮즺?섏뿀?듬땲?? ?ㅼ떆 濡쒓렇?명빐二쇱꽭??', 'error');
+        showToast('시스템 인증이 만료되었습니다. 다시 로그인해주세요.', 'error');
         handleLogout();
         return;
       }
@@ -771,13 +772,13 @@ const Dashboard = () => {
       try {
         const parsed = JSON.parse(message);
         if (parsed.error && parsed.error.includes('permission-denied')) {
-          showToast('??젣 沅뚰븳???놁뒿?덈떎. 愿由ъ옄 沅뚰븳???뺤씤?댁＜?몄슂.', 'error');
+          showToast('삭제 권한이 없습니다. 관리자 권한을 확인해주세요.', 'error');
           return;
         }
         message = parsed.error || message;
       } catch (e) {}
 
-      showToast('?좎껌????젣 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: ' + message, 'error');
+      showToast('신청서 삭제 중 오류가 발생했습니다: ' + message, 'error');
     }
   };
 
@@ -797,7 +798,7 @@ const Dashboard = () => {
         name: '', 
         company: '', 
         phone: '', 
-        regularBadgeZone: '李쎄퀬',
+        regularBadgeZone: '창고',
         remarks: '' 
       }]
     }));
@@ -884,7 +885,7 @@ const Dashboard = () => {
                     <FileText size={20} className="md:size-[24px]" />
                   </div>
                   <div>
-                    <h2 className="text-lg md:text-xl font-black text-[#1A1A1A]">?곸꽭 ?뺣낫</h2>
+                    <h2 className="text-lg md:text-xl font-black text-[#1A1A1A]">상세 정보</h2>
                     <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Personnel & Tool Registry System</p>
                   </div>
                 </div>
@@ -892,9 +893,9 @@ const Dashboard = () => {
                 <div className="w-full md:w-auto overflow-x-auto no-scrollbar">
                   <div className="flex bg-white p-1 rounded-xl border border-slate-200 min-w-max">
                      {[
-                       { id: 'summary', label: '?붿빟', icon: LayoutGrid },
-                       { id: 'entry', label: '?좎껌??, icon: FileText },
-                       { id: 'tools', label: '怨듦뎄紐⑸줉', icon: Wrench },
+                       { id: 'summary', label: '요약', icon: LayoutGrid },
+                       { id: 'entry', label: '신청서', icon: FileText },
+                       { id: 'tools', label: '공구목록', icon: Wrench },
                      ].map((tab) => (
                        <button
                          key={tab.id}
@@ -926,7 +927,7 @@ const Dashboard = () => {
                       {/* Summary Section (Existing modern style) */}
                       <div className="border-[3px] border-[#1A1A1A] p-8 relative overflow-hidden bg-white">
                         <div className="absolute top-0 right-0 p-4 border-l-2 border-b-2 border-[#1A1A1A] bg-slate-50">
-                           <p className="text-[9px] font-black text-center mb-1">蹂댁븞 ?뺤씤</p>
+                           <p className="text-[9px] font-black text-center mb-1">보안 확인</p>
                            <div className="w-16 h-16 border border-dashed border-slate-300 rounded flex items-center justify-center">
                               {selectedApp.status === 'approved' ? (
                                 <ApprovalSeal size="sm" className="rotate-[-12deg]" />
@@ -939,15 +940,15 @@ const Dashboard = () => {
                         <h3 className="text-2xl font-black text-center mb-10 tracking-widest uppercase italic">Warehouse Entry Permit</h3>
                         
                         <div className="grid grid-cols-2 md:grid-cols-4 border-2 border-[#1A1A1A] text-xs">
-                           <div className="bg-slate-100 p-2 md:p-3 font-black border-r-2 border-[#1A1A1A] flex items-center">?좎껌援щ텇</div>
-                           <div className="p-2 md:p-3 border-r-0 md:border-r-2 border-[#1A1A1A] flex items-center font-bold">?꾩떆異쒖엯 (怨듦뎄?ы븿)</div>
-                           <div className="bg-slate-100 p-2 md:p-3 font-black border-r-2 border-t-2 md:border-t-0 border-[#1A1A1A] flex items-center">?좎껌?쇱옄</div>
+                           <div className="bg-slate-100 p-2 md:p-3 font-black border-r-2 border-[#1A1A1A] flex items-center">신청구분</div>
+                           <div className="p-2 md:p-3 border-r-0 md:border-r-2 border-[#1A1A1A] flex items-center font-bold">임시출입 (공구포함)</div>
+                           <div className="bg-slate-100 p-2 md:p-3 font-black border-r-2 border-t-2 md:border-t-0 border-[#1A1A1A] flex items-center">신청일자</div>
                            <div className="p-2 md:p-3 border-t-2 md:border-t-0 flex items-center font-bold">{selectedApp.applyDate}</div>
 
-                           <div className="bg-slate-100 p-2 md:p-3 font-black border-t-2 border-r-2 border-[#1A1A1A] flex items-center">諛⑸Ц?낆껜</div>
+                           <div className="bg-slate-100 p-2 md:p-3 font-black border-t-2 border-r-2 border-[#1A1A1A] flex items-center">방문업체</div>
                            <div className="p-2 md:p-3 border-t-2 border-r-0 md:border-r-2 border-[#1A1A1A] flex items-center font-bold">{selectedApp.visitors?.[0]?.company || '-'}</div>
-                           <div className="bg-slate-100 p-2 md:p-3 font-black border-t-2 border-r-2 border-[#1A1A1A] flex items-center">諛⑸Ц?몄썝</div>
-                           <div className="p-2 md:p-3 border-t-2 flex items-center font-bold">{selectedApp.visitors?.length || 0} 紐?/div>
+                           <div className="bg-slate-100 p-2 md:p-3 font-black border-t-2 border-r-2 border-[#1A1A1A] flex items-center">방문인원</div>
+                           <div className="p-2 md:p-3 border-t-2 flex items-center font-bold">{selectedApp.visitors?.length || 0} 명</div>
                         </div>
                       </div>
 
@@ -955,7 +956,7 @@ const Dashboard = () => {
                       {selectedApp.visitors && selectedApp.visitors.length > 0 && (
                         <div className="space-y-6">
                           <div className="flex items-center gap-2 border-l-4 border-[#E30613] pl-4">
-                            <h4 className="text-sm font-black text-[#1A1A1A] uppercase tracking-wider">諛⑸Ц??紐낅떒 諛??곸꽭?뺣낫</h4>
+                            <h4 className="text-sm font-black text-[#1A1A1A] uppercase tracking-wider">방문자 명단 및 상세정보</h4>
                           </div>
                           <div className="grid grid-cols-1 gap-4">
                             {selectedApp.visitors.map((v, i) => (
@@ -967,27 +968,27 @@ const Dashboard = () => {
                                  </div>
                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[11px]">
                                     <div>
-                                      <p className="text-slate-400 font-bold mb-0.5">?앸뀈?붿씪</p>
+                                      <p className="text-slate-400 font-bold mb-0.5">생년월일</p>
                                       <p className="font-bold text-slate-700">{v.birthDate || '-'}</p>
                                     </div>
                                     <div>
-                                      <p className="text-slate-400 font-bold mb-0.5">?곕씫泥?/p>
+                                      <p className="text-slate-400 font-bold mb-0.5">연락처</p>
                                       <p className="font-bold text-slate-700">{v.phone || '-'}</p>
                                     </div>
                                     <div>
-                                      <p className="text-slate-400 font-bold mb-0.5">異쒖엯利앷뎄遺?/p>
+                                      <p className="text-slate-400 font-bold mb-0.5">출입증구분</p>
                                       <p className="font-black text-[#E30613]">{v.badgeType || '-'}</p>
                                     </div>
                                     <div>
-                                      <p className="text-slate-400 font-bold mb-0.5">?덇?援ъ뿭</p>
+                                      <p className="text-slate-400 font-bold mb-0.5">허가구역</p>
                                       <p className="font-bold text-slate-700">{v.accessZone || '-'}</p>
                                     </div>
                                     <div>
-                                      <p className="text-slate-400 font-bold mb-0.5">諛⑸Ц紐⑹쟻</p>
+                                      <p className="text-slate-400 font-bold mb-0.5">방문목적</p>
                                       <p className="font-bold text-slate-700">{v.purpose || '-'}</p>
                                     </div>
                                     <div className="col-span-2">
-                                      <p className="text-slate-400 font-bold mb-0.5">鍮꾧퀬</p>
+                                      <p className="text-slate-400 font-bold mb-0.5">비고</p>
                                       <p className="text-slate-600 italic">{v.remarks || '-'}</p>
                                     </div>
                                  </div>
@@ -1001,16 +1002,16 @@ const Dashboard = () => {
                     selectedApp.pdfUrls?.[0] ? (
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">?낅줈?쒕맂 異쒖엯 ?좎껌??(?ㅼ틪蹂?</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">업로드된 출입 신청서 (스캔본)</p>
                           <a href={selectedApp.pdfUrls[0]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-[#E30613] hover:underline flex items-center gap-1">
-                            <Download size={11} /> ?먮낯 ?ㅼ슫濡쒕뱶
+                            <Download size={11} /> 원본 다운로드
                           </a>
                         </div>
                         <iframe
                           src={selectedApp.pdfUrls[0]}
                           className="w-full rounded-2xl border border-slate-200 shadow-sm"
                           style={{ height: '70vh' }}
-                          title="異쒖엯?좎껌??
+                          title="출입신청서"
                         />
                       </div>
                     ) : (
@@ -1020,16 +1021,16 @@ const Dashboard = () => {
                     selectedApp.pdfUrls?.[1] ? (
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">?낅줈?쒕맂 怨듦뎄 諛섏엯 ?좎껌??(?ㅼ틪蹂?</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">업로드된 공구 반입 신청서 (스캔본)</p>
                           <a href={selectedApp.pdfUrls[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-[#E30613] hover:underline flex items-center gap-1">
-                            <Download size={11} /> ?먮낯 ?ㅼ슫濡쒕뱶
+                            <Download size={11} /> 원본 다운로드
                           </a>
                         </div>
                         <iframe
                           src={selectedApp.pdfUrls[1]}
                           className="w-full rounded-2xl border border-slate-200 shadow-sm"
                           style={{ height: '70vh' }}
-                          title="怨듦뎄諛섏엯?좎껌??
+                          title="공구반입신청서"
                         />
                       </div>
                     ) : (
@@ -1042,7 +1043,7 @@ const Dashboard = () => {
               {/* Modal Footer */}
               <div className="p-8 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3 rounded-b-[2.5rem]">
                  <Button variant="outline" className="px-8 min-w-32 h-12 bg-white" onClick={() => setSelectedApp(null)}>
-                    ?リ린
+                    닫기
                  </Button>
 
                  {selectedApp.status === 'pending' && isManager && (
@@ -1052,14 +1053,14 @@ const Dashboard = () => {
                         className="px-8 h-12 shadow-lg shadow-red-500/20" 
                         onClick={(e) => { e.stopPropagation(); handleApprove(selectedApp.id!); }}
                      >
-                        ?뱀씤?섍린
+                        승인하기
                      </Button>
                      <Button 
                         variant="outline" 
                         className="px-8 h-12 border-red-200 text-red-600 hover:bg-red-50" 
                         onClick={(e) => { e.stopPropagation(); handleReject(selectedApp.id!); }}
                      >
-                        諛섎젮?섍린
+                        반려하기
                      </Button>
                    </div>
                  )}
@@ -1070,7 +1071,7 @@ const Dashboard = () => {
                       className="px-6 h-12 border-red-200 text-red-600 hover:bg-red-50" 
                       onClick={(e) => { e.stopPropagation(); handleReject(selectedApp.id!); }}
                    >
-                      ?뱀씤 痍⑥냼
+                      승인 취소
                    </Button>
                  )}
                  
@@ -1084,7 +1085,7 @@ const Dashboard = () => {
                       }}
                    >
                       <Trash2 size={16} />
-                      ??젣?섍린
+                      삭제하기
                    </Button>
                  )}
               </div>
@@ -1132,7 +1133,7 @@ const Dashboard = () => {
             )}
           >
             <Calendar size={18} />
-            ?꾩껜 ?쇱젙
+            전체 일정
           </button>
           <button 
             onClick={() => { setView('applications'); setIsSidebarOpen(false); }}
@@ -1142,7 +1143,7 @@ const Dashboard = () => {
             )}
           >
             <FileText size={18} />
-            ?좎껌 ?댁뿭 議고쉶
+            신청 내역 조회
           </button>
           
           {canWriteData && (
@@ -1154,7 +1155,7 @@ const Dashboard = () => {
               )}
             >
               <FilePlus size={18} />
-              異쒖엯 ?좎껌???낅줈??
+              출입 신청서 업로드
             </button>
           )}
 
@@ -1169,7 +1170,7 @@ const Dashboard = () => {
                 )}
               >
                 <Shield size={18} />
-                ?댁슜??沅뚰븳 愿由?
+                이용자 권한 관리
               </button>
             </div>
           )}
@@ -1189,7 +1190,7 @@ const Dashboard = () => {
                  </div>
                  <div>
                     <p className="text-sm font-black text-[#1A1A1A]">
-                      {adminId || (user?.email === 'cloudkiss90@gmail.com' ? 'System' : user?.displayName || '?ъ슜??)}
+                      {adminId || (user?.email === 'cloudkiss90@gmail.com' ? 'System' : user?.displayName || '사용자')}
                     </p>
                     <p className="text-[10px] font-bold text-[#E30613] uppercase tracking-widest leading-none">{roleLabel}</p>
                  </div>
@@ -1203,14 +1204,14 @@ const Dashboard = () => {
                    )}
                  >
                     <Settings size={12} />
-                    ?ㅼ젙
+                    설정
                  </button>
                  <button 
                    onClick={handleLogout}
                    className="flex items-center justify-center gap-2 py-2 rounded-xl text-[10px] font-black uppercase bg-white text-slate-400 hover:text-red-600 border border-slate-100 transition-all"
                  >
                     <LogOut size={12} />
-                    濡쒓렇?꾩썐
+                    로그아웃
                  </button>
               </div>
            </div>
@@ -1229,7 +1230,7 @@ const Dashboard = () => {
              </button>
              <div className="flex flex-col">
                 <h2 className="text-base md:text-xl font-bold text-[#1A1A1A] tracking-tight leading-none md:leading-normal">
-                  {view === 'calendar' ? '異쒖엯 ?쇱젙 罹섎┛?? : view === 'applications' ? '李쎄퀬 異쒖엯 ?뱀씤 ?꾪솴' : view === 'create' ? '異쒖엯 ?좎껌???낅줈?? : view === 'admins' ? '?댁슜??沅뚰븳 愿由? : '???꾨줈???ㅼ젙'}
+                  {view === 'calendar' ? '출입 일정 캘린더' : view === 'applications' ? '창고 출입 승인 현황' : view === 'create' ? '출입 신청서 업로드' : view === 'admins' ? '이용자 권한 관리' : '내 프로필 설정'}
                 </h2>
                 <p className="text-[8px] md:text-[9px] font-bold text-[#E30613] uppercase tracking-widest mt-0.5">
                   {roleLabel} &bull; SWISSPORT
@@ -1257,7 +1258,7 @@ const Dashboard = () => {
                    className="absolute top-12 right-0 w-80 bg-white border border-slate-200 rounded-3xl shadow-2xl z-[100] overflow-hidden"
                  >
                     <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                       <h3 className="font-black text-sm text-slate-800 uppercase tracking-widest">?ㅼ떆媛??뚮┝</h3>
+                       <h3 className="font-black text-sm text-slate-800 uppercase tracking-widest">실시간 알림</h3>
                        <span className="text-[10px] font-bold text-[#E30613] bg-red-50 px-2 py-0.5 rounded-full">{notifications.length}</span>
                     </div>
                     <div className="max-h-[400px] overflow-y-auto p-2">
@@ -1292,7 +1293,7 @@ const Dashboard = () => {
                                  <p className="text-[11px] font-medium text-slate-500 truncate">{notif.description}</p>
                                  {notif.time && (
                                    <p className="text-[9px] font-bold text-slate-300 mt-1 uppercase">
-                                     {format(new Date(notif.time.seconds * 1000), 'HH:mm')} &bull; {isToday(new Date(notif.time.seconds * 1000)) ? '?ㅻ뒛' : format(new Date(notif.time.seconds * 1000), 'MM/dd')}
+                                     {format(new Date(notif.time.seconds * 1000), 'HH:mm')} &bull; {isToday(new Date(notif.time.seconds * 1000)) ? '오늘' : format(new Date(notif.time.seconds * 1000), 'MM/dd')}
                                    </p>
                                  )}
                               </div>
@@ -1301,7 +1302,7 @@ const Dashboard = () => {
                        ) : (
                          <div className="py-12 text-center">
                             <Bell className="mx-auto text-slate-200 mb-3" size={32} />
-                            <p className="text-[11px] font-bold text-slate-400">?덈줈???뚮┝???놁뒿?덈떎.</p>
+                            <p className="text-[11px] font-bold text-slate-400">새로운 알림이 없습니다.</p>
                          </div>
                        )}
                     </div>
@@ -1310,7 +1311,7 @@ const Dashboard = () => {
                         className="p-4 border-t border-slate-100 text-center"
                         onClick={() => setIsNotificationsOpen(false)}
                       >
-                         <button className="text-[10px] font-black text-slate-400 hover:text-[#E30613] transition-colors uppercase tracking-widest">紐⑤몢 ?リ린</button>
+                         <button className="text-[10px] font-black text-slate-400 hover:text-[#E30613] transition-colors uppercase tracking-widest">모두 닫기</button>
                       </div>
                     )}
                  </motion.div>
@@ -1344,7 +1345,7 @@ const Dashboard = () => {
                  animate={{ opacity: 1, y: 0 }}
                  className="h-full max-w-7xl mx-auto"
                >
-                 <AdminsManagementView showToast={showToast} />
+                 <AdminsManagementView />
                </motion.div>
             )}
             {view === 'profile' && (
@@ -1354,7 +1355,7 @@ const Dashboard = () => {
                  animate={{ opacity: 1, y: 0 }}
                  className="h-full max-w-7xl mx-auto"
                >
-                 <ProfileView userProfile={userProfile} adminId={adminId} showToast={showToast} />
+                 <ProfileView userProfile={userProfile} adminId={adminId} />
                </motion.div>
             )}
             {view === 'applications' && (
@@ -1368,7 +1369,7 @@ const Dashboard = () => {
                    <div className="relative w-full md:w-96 group order-2 md:order-1">
                       <Search size={16} className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#E30613] transition-colors" />
                       <input 
-                        placeholder="?대쫫, ?낆껜紐? ?좎쭨 寃??.." 
+                        placeholder="이름, 업체명, 날짜 검색..." 
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full pl-12 pr-6 py-4 md:py-3.5 bg-white border border-slate-200 rounded-xl text-sm font-bold shadow-sm outline-none transition-all ring-1 ring-slate-200 focus:ring-2 focus:ring-[#E30613]/20"
@@ -1377,11 +1378,11 @@ const Dashboard = () => {
                    {canWriteData && (
                      <div className="flex gap-2 order-1 md:order-2">
                         <Button variant="outline" className="flex-1 md:flex-none px-5 border-none shadow-sm ring-1 ring-slate-200 text-xs" onClick={() => setSearchQuery('')}>
-                           珥덇린??
+                           초기화
                         </Button>
                         <Button variant="primary" onClick={() => setView('create')} className="flex-1 md:flex-none px-6 text-xs">
                            <FilePlus size={16} />
-                           ?좉퇋 ?좎껌
+                           신규 신청
                         </Button>
                      </div>
                    )}
@@ -1406,27 +1407,27 @@ const Dashboard = () => {
                            <div className="flex flex-col gap-0.5 min-w-0">
                               <div className="flex items-center gap-2 md:gap-3 flex-wrap">
                                 <h3 className="font-black text-base md:text-lg text-[#1A1A1A] truncate">
-                                  {app.visitors?.[0]?.name || '?듬챸'} {app.visitors?.length > 1 ? `??${app.visitors.length - 1}紐? : ''}
+                                  {app.visitors?.[0]?.name || '익명'} {app.visitors?.length > 1 ? `외 ${app.visitors.length - 1}명` : ''}
                                 </h3>
                                 <span className={cn(
                                   "px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest shrink-0",
                                   app.status === 'approved' ? "bg-emerald-50 text-emerald-600" : "bg-orange-50 text-orange-600"
                                 )}>
-                                  {app.status === 'approved' ? '?뱀씤?? : app.status === 'pending' ? '?湲곗쨷' : '諛섎젮??}
+                                  {app.status === 'approved' ? '승인됨' : app.status === 'pending' ? '대기중' : '반려됨'}
                                 </span>
                               </div>
                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">
-                                {app.visitors?.[0]?.company || '?뚯냽 ?뺣낫 ?놁쓬'} &bull; {app.applyDate}
+                                {app.visitors?.[0]?.company || '소속 정보 없음'} &bull; {app.applyDate}
                               </p>
                            </div>
                         </div>
 
                         <div className="flex items-center gap-3 md:gap-8 w-full md:w-auto pl-14 md:pl-0">
                            <div className="text-center px-3 md:px-4 border-l border-slate-100 md:border-r">
-                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">諛섏엯 怨듦뎄</p>
+                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">반입 공구</p>
                               <div className="flex items-center gap-2 justify-center">
                                  <Wrench size={12} className="text-[#E30613]" />
-                                 <span className="font-black text-slate-900 text-sm">{app.tools?.length || 0}醫?/span>
+                                 <span className="font-black text-slate-900 text-sm">{app.tools?.length || 0}종</span>
                               </div>
                            </div>
                            <div className="flex flex-wrap gap-1.5 md:gap-2" onClick={(e) => e.stopPropagation()}>
@@ -1441,14 +1442,14 @@ const Dashboard = () => {
                                           handleReject(app.id);
                                         }}
                                       >
-                                        ?뱀씤 痍⑥냼
+                                        승인 취소
                                       </Button>
                                    )}
                                 </div>
                              ) : isManager ? (
                                 <div className="flex gap-1.5">
                                    <Button variant="primary" className="px-3 md:px-5 text-xs" onClick={(e) => { e.stopPropagation(); handleApprove(app.id); }}>
-                                      ?뱀씤?섍린
+                                      승인하기
                                    </Button>
                                    <Button
                                       variant="outline"
@@ -1458,12 +1459,12 @@ const Dashboard = () => {
                                         await handleReject(app.id);
                                       }}
                                     >
-                                      諛섎젮
+                                      반려
                                    </Button>
                                 </div>
                              ) : (
                                 <Button variant="outline" disabled className="text-xs border-none ring-1 ring-slate-100">
-                                   ?뱀씤 ?湲곗쨷
+                                   승인 대기중
                                 </Button>
                              )}
                              {(isManager || (user && app.applicantId === user.uid && app.status === 'pending')) && (
@@ -1473,7 +1474,7 @@ const Dashboard = () => {
                                      setConfirmDeleteId(app.id!);
                                    }}
                                   className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors rounded-lg flex items-center justify-center"
-                                  title="??젣"
+                                  title="삭제"
                                >
                                   <XCircle size={18} />
                                </button>
@@ -1531,11 +1532,11 @@ const Dashboard = () => {
                   {paginatedApps?.length === 0 && !appsLoading && (
                     <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-200">
                         <FileText className="mx-auto text-slate-200 mb-4" size={48} />
-                        <p className="text-sm font-bold text-slate-400">?깅줉???좎껌 ?댁뿭???놁뒿?덈떎.</p>
+                        <p className="text-sm font-bold text-slate-400">등록된 신청 내역이 없습니다.</p>
                     </div>
                   )}
-                  {appsLoading && <div className="text-center p-20 text-slate-300 uppercase font-black tracking-widest text-xs">?곗씠???숆린??以?..</div>}
-                  {appsError && <div className="text-center p-8 text-red-500 text-sm font-bold">?곗씠??濡쒕뱶 ?ㅽ뙣: {appsError.message}</div>}
+                  {appsLoading && <div className="text-center p-20 text-slate-300 uppercase font-black tracking-widest text-xs">데이터 동기화 중...</div>}
+                  {appsError && <div className="text-center p-8 text-red-500 text-sm font-bold">데이터 로드 실패: {appsError.message}</div>}
                 </div>
               </motion.div>
             )}
@@ -1554,7 +1555,7 @@ const Dashboard = () => {
                         <FilePlus size={20} className="md:size-[24px] text-white" />
                       </div>
                       <div>
-                        <h2 className="text-xl md:text-2xl font-black text-[#1A1A1A] tracking-tight">異쒖엯 ?좎껌???낅줈??/h2>
+                        <h2 className="text-xl md:text-2xl font-black text-[#1A1A1A] tracking-tight">출입 신청서 업로드</h2>
                         <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] md:tracking-[0.2em] mt-1">Registry System</p>
                       </div>
                     </div>
@@ -1584,10 +1585,10 @@ const Dashboard = () => {
                         </div>
                         <div className="text-center">
                           <p className="text-base md:text-lg font-black text-[#1A1A1A] mb-1">
-                            {isAnalyzing ? "臾몄꽌瑜?泥섎━ 以묒엯?덈떎..." : isDragging ? "?ш린???볦쑝?몄슂" : "PDF ?낅줈??}
+                            {isAnalyzing ? "문서를 처리 중입니다..." : isDragging ? "여기에 놓으세요" : "PDF 업로드"}
                           </p>
                           <p className="text-[10px] md:text-xs font-medium text-slate-400 max-w-xs mx-auto">
-                            {isAnalyzing ? "AI媛 ?뺣낫瑜?異붿텧?섍퀬 ?덉뒿?덈떎." : "?좎껌?쒕? ?대┃?섍굅???닿납?쇰줈 ?뚯뼱?ㅼ꽭??"}
+                            {isAnalyzing ? "AI가 정보를 추출하고 있습니다." : "신청서를 클릭하거나 이곳으로 끌어오세요."}
                           </p>
                         </div>
                         <input type="file" className="hidden" accept="application/pdf,image/*" onChange={handleFileUpload} disabled={isAnalyzing} multiple />
@@ -1623,7 +1624,7 @@ const Dashboard = () => {
                                   : "bg-white text-slate-500 border-slate-200 hover:border-[#E30613]/50"
                               )}
                             >
-                              異쒖엯?좎껌??
+                              출입신청서
                             </button>
                             <button
                               onClick={() => setFileCategories(prev => ({ ...prev, [idx]: 'tools' }))}
@@ -1634,7 +1635,7 @@ const Dashboard = () => {
                                   : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
                               )}
                             >
-                              怨듦뎄由ъ뒪??
+                              공구리스트
                             </button>
                           </div>
                           <button
@@ -1650,8 +1651,8 @@ const Dashboard = () => {
                                   return next;
                                 });
                               } catch (err) {
-                                console.error('吏곸씤 ?곸슜 ?ㅽ뙣:', err);
-                                showToast('吏곸씤 ?곸슜 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.', 'error');
+                                console.error('직인 적용 실패:', err);
+                                showToast('직인 적용 중 오류가 발생했습니다.', 'error');
                               } finally {
                                 setIsStamping(false);
                               }
@@ -1659,7 +1660,7 @@ const Dashboard = () => {
                             className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#E30613]/30 bg-red-50 hover:bg-red-100 text-[#E30613] text-xs font-black transition-colors disabled:opacity-50 shrink-0"
                           >
                             <Download size={13} />
-                            {isStamping ? '泥섎━ 以?..' : '吏곸씤 ?ㅼ슫濡쒕뱶'}
+                            {isStamping ? '처리 중...' : '직인 다운로드'}
                           </button>
                         </div>
                       ))}
@@ -1670,10 +1671,10 @@ const Dashboard = () => {
                   {(newApp.visitors?.length === 0 && newApp.escorts?.length === 0 && newApp.tools?.length === 0) ? (
                     isAnalyzing ? null : (
                       <div className="text-center py-10 bg-slate-50 rounded-3xl border border-dashed border-slate-200 mb-8">
-                         <p className="text-sm font-bold text-slate-500 mb-4">異붿텧???곗씠?곌? ?놁뒿?덈떎. 吏곸젒 ?낅젰?섏떆寃좎뒿?덇퉴?</p>
+                         <p className="text-sm font-bold text-slate-500 mb-4">추출된 데이터가 없습니다. 직접 입력하시겠습니까?</p>
                          <Button variant="outline" onClick={handleAddVisitor}>
                             <Plus size={14} />
-                            諛⑸Ц??吏곸젒 異붽?
+                            방문자 직접 추가
                          </Button>
                       </div>
                     )
@@ -1683,11 +1684,11 @@ const Dashboard = () => {
                        <div className="flex items-center justify-between">
                           <h3 className="text-[10px] font-black text-[#E30613] uppercase tracking-[0.2em] flex items-center gap-2">
                             <CheckCircle size={14} />
-                            諛⑸Ц???몄쟻?ы빆 諛?異쒖엯?뺣낫
+                            방문자 인적사항 및 출입정보
                           </h3>
                           <Button variant="outline" size="sm" onClick={handleAddVisitor} className="h-8 py-0 px-3 text-[10px]">
                             <Plus size={12} />
-                            諛⑸Ц??異붽?
+                            방문자 추가
                           </Button>
                        </div>
                             <div className="grid grid-cols-1 gap-4">
@@ -1703,20 +1704,20 @@ const Dashboard = () => {
                                                   className="font-black text-lg text-[#1A1A1A] border-b border-slate-300 outline-none focus:border-[#E30613]"
                                                   value={v.name}
                                                   onChange={(e) => handleUpdateVisitor(i, { name: e.target.value })}
-                                                  placeholder="?깅챸"
+                                                  placeholder="성명"
                                                 />
                                               ) : (
-                                                <p className="font-black text-lg text-[#1A1A1A]">{v.name || '?깅챸 誘몄긽'}</p>
+                                                <p className="font-black text-lg text-[#1A1A1A]">{v.name || '성명 미상'}</p>
                                               )}
                                               {editingVisitor === i ? (
                                                 <input 
                                                   className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200 outline-none block mt-1 w-full"
                                                   value={v.company}
                                                   onChange={(e) => handleUpdateVisitor(i, { company: e.target.value })}
-                                                  placeholder="?뚯냽"
+                                                  placeholder="소속"
                                                 />
                                               ) : (
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{v.company || '?뚯냽 ?뺣낫 ?놁쓬'}</p>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{v.company || '소속 정보 없음'}</p>
                                               )}
                                           </div>
                                         </div>
@@ -1724,14 +1725,14 @@ const Dashboard = () => {
                                           <button 
                                             onClick={() => setEditingVisitor(editingVisitor === i ? null : i)}
                                             className="p-2 text-slate-400 hover:text-[#E30613] hover:bg-slate-50 rounded-lg transition-colors"
-                                            title="?섏젙?섍린"
+                                            title="수정하기"
                                           >
                                             {editingVisitor === i ? <CheckCircle size={18} /> : <Settings size={18} />}
                                           </button>
                                           <button 
                                             onClick={() => handleRemoveVisitor(i)}
                                             className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                            title="??젣?섍린"
+                                            title="삭제하기"
                                           >
                                             <Trash2 size={18} />
                                           </button>
@@ -1740,13 +1741,13 @@ const Dashboard = () => {
                                     
                                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-4 md:gap-y-6 gap-x-4 md:gap-x-8">
                                         {[
-                                          { label: '?앸뀈?붿씪', key: 'birthDate' },
-                                          { label: '?곕씫泥?, key: 'phone' },
-                                          { label: '異쒖엯利?醫낅쪟', key: 'badgeType' },
-                                          { label: '異쒖엯 ?덇?援ъ뿭', key: 'accessZone' },
-                                          { label: '諛⑸Ц?쇱젙', key: 'visitDate' },
-                                          { label: '諛⑸Ц紐⑹쟻', key: 'purpose' },
-                                          { label: '?묒닔踰덊샇', key: 'receiptNo' },
+                                          { label: '생년월일', key: 'birthDate' },
+                                          { label: '연락처', key: 'phone' },
+                                          { label: '출입증 종류', key: 'badgeType' },
+                                          { label: '출입 허가구역', key: 'accessZone' },
+                                          { label: '방문일정', key: 'visitDate' },
+                                          { label: '방문목적', key: 'purpose' },
+                                          { label: '접수번호', key: 'receiptNo' },
                                         ].map((field) => (
                                           <div key={field.key}>
                                             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{field.label}</p>
@@ -1764,7 +1765,7 @@ const Dashboard = () => {
                                     </div>
                                     
                                     <div className="mt-6 pt-6 border-t border-slate-50">
-                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">鍮꾧퀬</p>
+                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">비고</p>
                                         {editingVisitor === i ? (
                                           <textarea 
                                             className="text-xs font-medium text-slate-600 leading-relaxed w-full bg-slate-50 p-2 rounded outline-none focus:ring-1 focus:ring-[#E30613]/50"
@@ -1783,11 +1784,11 @@ const Dashboard = () => {
                           <div className="flex items-center justify-between">
                              <h3 className="text-[10px] font-black text-[#E30613] uppercase tracking-[0.2em] flex items-center gap-2">
                                 <User size={14} />
-                                ?몄넄???뺣낫 ({(newApp.escorts || []).length})
+                                인솔자 정보 ({(newApp.escorts || []).length})
                              </h3>
                              <Button variant="outline" size="sm" onClick={handleAddEscort} className="h-8 py-0 px-3 text-[10px]">
                                <Plus size={12} />
-                               ?몄넄??異붽?
+                               인솔자 추가
                              </Button>
                           </div>
                           {(newApp.escorts && newApp.escorts.length > 0) ? (
@@ -1798,21 +1799,21 @@ const Dashboard = () => {
                                        <button 
                                          onClick={() => setEditingEscort(editingEscort === i ? null : i)}
                                          className="p-2 text-slate-400 hover:text-[#E30613] hover:bg-white rounded-lg transition-colors border border-transparent hover:border-slate-100"
-                                         title="?섏젙?섍린"
+                                         title="수정하기"
                                        >
                                          {editingEscort === i ? <CheckCircle size={18} /> : <Settings size={18} />}
                                        </button>
                                        <button 
                                          onClick={() => handleRemoveEscort(i)}
                                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-slate-100"
-                                         title="??젣?섍린"
+                                         title="삭제하기"
                                        >
                                          <Trash2 size={18} />
                                        </button>
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-8">
                                        <div>
-                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">?깅챸</p>
+                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">성명</p>
                                           {editingEscort === i ? (
                                             <input 
                                               className="text-sm font-black text-[#1A1A1A] bg-white p-2 rounded w-full outline-none border border-slate-200"
@@ -1824,7 +1825,7 @@ const Dashboard = () => {
                                           )}
                                        </div>
                                        <div>
-                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">?뚯냽</p>
+                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">소속</p>
                                           {editingEscort === i ? (
                                             <input 
                                               className="text-sm font-bold text-slate-700 bg-white p-2 rounded w-full outline-none border border-slate-200"
@@ -1836,7 +1837,7 @@ const Dashboard = () => {
                                           )}
                                        </div>
                                        <div>
-                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">?곕씫泥?/p>
+                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">연락처</p>
                                           {editingEscort === i ? (
                                             <input 
                                               className="text-sm font-bold text-slate-700 bg-white p-2 rounded w-full outline-none border border-slate-200"
@@ -1848,7 +1849,7 @@ const Dashboard = () => {
                                           )}
                                        </div>
                                        <div>
-                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">?뺢퇋異쒖엯利앷뎄??/p>
+                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">정규출입증구역</p>
                                           {editingEscort === i ? (
                                             <input 
                                               className="text-sm font-bold text-slate-700 bg-white p-2 rounded w-full outline-none border border-slate-200"
@@ -1861,7 +1862,7 @@ const Dashboard = () => {
                                        </div>
                                     </div>
                                     <div className="mt-6 pt-6 border-t border-slate-200">
-                                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">鍮꾧퀬</p>
+                                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">비고</p>
                                        {editingEscort === i ? (
                                           <textarea 
                                             className="text-xs font-medium text-slate-600 w-full bg-white p-2 rounded outline-none border border-slate-200"
@@ -1877,7 +1878,7 @@ const Dashboard = () => {
                              </div>
                           ) : (
                              <div className="text-center py-10 bg-white rounded-3xl border border-dashed border-slate-200">
-                                <p className="text-xs font-bold text-slate-400">?깅줉???몄넄???뺣낫媛 ?놁뒿?덈떎.</p>
+                                <p className="text-xs font-bold text-slate-400">등록된 인솔자 정보가 없습니다.</p>
                              </div>
                           )}
                        </div>
@@ -1887,11 +1888,11 @@ const Dashboard = () => {
                           <div className="flex items-center justify-between mb-6">
                              <h3 className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em] flex items-center gap-2">
                                 <Wrench size={14} className="text-[#E30613]" />
-                                諛섏엯 怨듦뎄 紐⑸줉 ({(newApp.tools || []).length})
+                                반입 공구 목록 ({(newApp.tools || []).length})
                              </h3>
                              <Button variant="outline" size="sm" onClick={handleAddTool} className="h-8 py-0 px-3 text-[10px] border-white/20 text-white hover:bg-white/10 uppercase tracking-widest font-black">
                                <Plus size={12} className="text-[#E30613]" />
-                               怨듦뎄 異붽?
+                               공구 추가
                              </Button>
                           </div>
                           {(newApp.tools && newApp.tools.length > 0) ? (
@@ -1899,10 +1900,10 @@ const Dashboard = () => {
                                 <table className="w-full text-left text-xs min-w-[500px]">
                                    <thead className="bg-white/5 text-slate-400 uppercase font-black text-[9px] tracking-widest border-b border-white/5">
                                       <tr>
-                                         <th className="px-3 md:px-6 py-3 md:py-4">?덈챸</th>
-                                         <th className="px-3 md:px-6 py-3 md:py-4">?섎웾</th>
-                                         <th className="px-3 md:px-6 py-3 md:py-4">洹쒓꺽 諛?鍮꾧퀬</th>
-                                         <th className="px-3 md:px-6 py-3 md:py-4 w-24 md:w-32 text-center">?묒뾽</th>
+                                         <th className="px-3 md:px-6 py-3 md:py-4">품명</th>
+                                         <th className="px-3 md:px-6 py-3 md:py-4">수량</th>
+                                         <th className="px-3 md:px-6 py-3 md:py-4">규격 및 비고</th>
+                                         <th className="px-3 md:px-6 py-3 md:py-4 w-24 md:w-32 text-center">작업</th>
                                       </tr>
                                    </thead>
                                    <tbody className="divide-y divide-white/5">
@@ -1914,10 +1915,10 @@ const Dashboard = () => {
                                                    className="bg-white/10 text-white p-1 rounded w-full outline-none focus:ring-1 focus:ring-[#E30613] placeholder:text-white/20"
                                                    value={t.name}
                                                    onChange={(e) => handleUpdateTool(i, { name: e.target.value })}
-                                                   placeholder="?덈챸"
+                                                   placeholder="품명"
                                                  />
                                                ) : (
-                                                 <span className="font-black">{t.name || '?덈챸 誘몄긽'}</span>
+                                                 <span className="font-black">{t.name || '품명 미상'}</span>
                                                )}
                                             </td>
                                             <td className="px-3 md:px-6 py-3 md:py-4">
@@ -1945,7 +1946,7 @@ const Dashboard = () => {
                                                    className="bg-white/10 text-white p-1 rounded w-full outline-none focus:ring-1 focus:ring-[#E30613] placeholder:text-white/20"
                                                    value={t.spec || t.note || ''}
                                                    onChange={(e) => handleUpdateTool(i, { spec: e.target.value })}
-                                                   placeholder="洹쒓꺽 諛?鍮꾧퀬"
+                                                   placeholder="규격 및 비고"
                                                  />
                                                ) : (
                                                  <span className="text-white/50 italic">{t.spec || t.note || '-'}</span>
@@ -1956,14 +1957,14 @@ const Dashboard = () => {
                                                  <button 
                                                    onClick={() => setEditingTool(editingTool === i ? null : i)}
                                                    className="p-1.5 text-white/70 hover:text-white transition-colors"
-                                                   title="?섏젙?섍린"
+                                                   title="수정하기"
                                                  >
                                                    {editingTool === i ? <CheckCircle size={16} /> : <Settings size={16} />}
                                                  </button>
                                                  <button 
                                                    onClick={() => handleRemoveTool(i)}
                                                    className="p-1.5 text-white/70 hover:text-red-500 transition-colors"
-                                                   title="??젣?섍린"
+                                                   title="삭제하기"
                                                  >
                                                    <Trash2 size={16} />
                                                  </button>
@@ -1976,15 +1977,15 @@ const Dashboard = () => {
                              </div>
                           ) : (
                              <div className="text-center py-10 bg-white/5 rounded-2xl border border-dashed border-white/10">
-                                <p className="text-xs font-bold text-white/30">諛섏엯 怨듦뎄 紐⑸줉??鍮꾩뼱?덉뒿?덈떎.</p>
+                                <p className="text-xs font-bold text-white/30">반입 공구 목록이 비어있습니다.</p>
                              </div>
                           )}
                        </div>
 
                        <div className="pt-8 flex gap-3">
-                          <Button variant="outline" className="flex-1 py-4 h-14 bg-white ring-1 ring-slate-200 border-none" onClick={() => setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' })}>?ㅼ떆 ?묒꽦</Button>
+                          <Button variant="outline" className="flex-1 py-4 h-14 bg-white ring-1 ring-slate-200 border-none" onClick={() => setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' })}>다시 작성</Button>
                           <Button variant="primary" className="flex-[3] py-4 h-14 shadow-2xl shadow-red-500/20" onClick={submitApplication}>
-                             ?좎껌???쇨큵 ?낅줈??
+                             신청서 일괄 업로드
                              <ArrowRight size={18} />
                           </Button>
                        </div>
@@ -2002,12 +2003,12 @@ const Dashboard = () => {
                 <div className="w-20 h-20 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
                   <Trash2 size={40} />
                 </div>
-                <h3 className="text-2xl font-black text-slate-900 mb-2">??젣 ?뺤씤</h3>
-                <p className="text-slate-500 font-bold mb-8">?곴뎄?곸쑝濡???젣?섏떆寃좎뒿?덇퉴?</p>
+                <h3 className="text-2xl font-black text-slate-900 mb-2">삭제 확인</h3>
+                <p className="text-slate-500 font-bold mb-8">영구적으로 삭제하시겠습니까?</p>
                 <div className="grid grid-cols-2 gap-3">
-                  <Button variant="outline" className="h-14 font-black" onClick={() => setConfirmDeleteId(null)} disabled={isDeleting}>痍⑥냼</Button>
+                  <Button variant="outline" className="h-14 font-black" onClick={() => setConfirmDeleteId(null)} disabled={isDeleting}>취소</Button>
                   <Button variant="danger" className="h-14 font-black" onClick={() => performDeletion(confirmDeleteId)} disabled={isDeleting}>
-                    {isDeleting ? '??젣 以?..' : '?뺤씤'}
+                    {isDeleting ? '삭제 중...' : '확인'}
                   </Button>
                 </div>
               </div>
@@ -2020,12 +2021,12 @@ const Dashboard = () => {
                 <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
                   <CheckCircle size={40} />
                 </div>
-                <h3 className="text-2xl font-black text-slate-900 mb-2">?뱀씤 ?뺤씤</h3>
-                <p className="text-slate-500 font-bold mb-8">???좎껌?쒕? ?뱀씤?섏떆寃좎뒿?덇퉴?</p>
+                <h3 className="text-2xl font-black text-slate-900 mb-2">승인 확인</h3>
+                <p className="text-slate-500 font-bold mb-8">이 신청서를 승인하시겠습니까?</p>
                 <div className="grid grid-cols-2 gap-3">
-                  <Button variant="outline" className="h-14 font-black" onClick={() => setConfirmApproveId(null)} disabled={isProcessing}>痍⑥냼</Button>
+                  <Button variant="outline" className="h-14 font-black" onClick={() => setConfirmApproveId(null)} disabled={isProcessing}>취소</Button>
                   <Button variant="primary" className="h-14 font-black" onClick={() => performApprove(confirmApproveId)} disabled={isProcessing}>
-                    {isProcessing ? '泥섎━ 以?..' : '?뱀씤'}
+                    {isProcessing ? '처리 중...' : '승인'}
                   </Button>
                 </div>
               </div>
@@ -2039,17 +2040,17 @@ const Dashboard = () => {
                   <AlertCircle size={40} />
                 </div>
                 <h3 className="text-2xl font-black text-slate-900 mb-2">
-                  {applications.find(a => a.id === confirmRejectId)?.status === 'approved' ? '?뱀씤 痍⑥냼' : '諛섎젮 ?뺤씤'}
+                  {applications.find(a => a.id === confirmRejectId)?.status === 'approved' ? '승인 취소' : '반려 확인'}
                 </h3>
                 <p className="text-slate-500 font-bold mb-8">
                   {applications.find(a => a.id === confirmRejectId)?.status === 'approved' 
-                    ? '?뱀씤??痍⑥냼?섍퀬 ?湲??곹깭濡??섎룎由ъ떆寃좎뒿?덇퉴?' 
-                    : '???좎껌?쒕? 諛섎젮?섏떆寃좎뒿?덇퉴?'}
+                    ? '승인을 취소하고 대기 상태로 되돌리시겠습니까?' 
+                    : '이 신청서를 반려하시겠습니까?'}
                 </p>
                 <div className="grid grid-cols-2 gap-3">
-                  <Button variant="outline" className="h-14 font-black" onClick={() => setConfirmRejectId(null)} disabled={isProcessing}>痍⑥냼</Button>
+                  <Button variant="outline" className="h-14 font-black" onClick={() => setConfirmRejectId(null)} disabled={isProcessing}>취소</Button>
                   <Button variant="danger" className="h-14 font-black" onClick={() => performRejectOrCancel(confirmRejectId)} disabled={isProcessing}>
-                    {isProcessing ? '泥섎━ 以?..' : '?뺤씤'}
+                    {isProcessing ? '처리 중...' : '확인'}
                   </Button>
                 </div>
               </div>
