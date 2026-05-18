@@ -113,8 +113,18 @@ export const aiService = {
       
       console.log("AI Analysis Success");
       return JSON.parse(text);
-    } catch (error) {
+    } catch (error: any) {
       console.error("AI Analysis Error Details:", error);
+      // 할당량 초과(429) 시 빈 결과 반환 — 앱 충돌 방지
+      if (
+        error?.status === 429 ||
+        error?.message?.includes('429') ||
+        error?.message?.toLowerCase().includes('quota') ||
+        error?.message?.toLowerCase().includes('rate')
+      ) {
+        console.warn("Gemini API 할당량 초과 — 빈 결과 반환");
+        return { visitors: [], escorts: [], tools: [], applicantName: '' };
+      }
       throw error;
     }
   }

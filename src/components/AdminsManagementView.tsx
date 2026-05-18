@@ -1,19 +1,34 @@
-import React, { useState } from 'react';
-import { Shield, RotateCcw, UserPlus, X, Info, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Shield, RotateCcw, UserPlus, X, Info, Trash2, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, orderBy, doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
-import { useCollection } from 'react-firebase-hooks/firestore';
+import { collection, query, orderBy, doc, setDoc, deleteDoc, serverTimestamp, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Card, cn } from './ui';
 
 export const AdminsManagementView = ({ showToast }: {
   showToast?: (message: string, type: 'success' | 'error' | 'info') => void
 }) => {
-  const [usersSnapshot, usersLoading] = useCollection(query(collection(db, 'users'), orderBy('updatedAt', 'desc')));
-  const [credsSnapshot, credsLoading] = useCollection(query(collection(db, 'credentials'), orderBy('createdAt', 'desc')));
+  const [allProfiles, setAllProfiles] = useState<any[]>([]);
+  const [allCredentials, setAllCredentials] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const allProfiles = usersSnapshot?.docs.map(doc => ({ id: doc.id, ...doc.data() as any })) || [];
-  const allCredentials = credsSnapshot?.docs.map(doc => ({ id: doc.id, ...doc.data() as any })) || [];
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [usersSnap, credsSnap] = await Promise.all([
+        getDocs(query(collection(db, 'users'), orderBy('updatedAt', 'desc'))),
+        getDocs(query(collection(db, 'credentials'), orderBy('createdAt', 'desc')))
+      ]);
+      setAllProfiles(usersSnap.docs.map(d => ({ id: d.id, ...d.data() as any })));
+      setAllCredentials(credsSnap.docs.map(d => ({ id: d.id, ...d.data() as any })));
+    } catch (err) {
+      console.error('관리자 데이터 로드 실패:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const notify = (msg: string, type: 'success' | 'error' | 'info') => {
     if (showToast) showToast(msg, type);
@@ -141,6 +156,7 @@ export const AdminsManagementView = ({ showToast }: {
       }
 
       notify('해당 계정의 권한이 성공적으로 변경되었습니다.', 'success');
+      await loadData();
     } catch (err: any) {
       console.error("Role update error:", err);
       notify('권한 변경에 실패했습니다: ' + err.message, 'error');
@@ -171,6 +187,7 @@ export const AdminsManagementView = ({ showToast }: {
       setNewUserId('');
       setNewUserPassword('');
       setNewUserName('');
+      await loadData();
     } catch (err: any) {
       console.error("User creation error:", err);
       notify('계정 생성 실패: ' + err.message, 'error');
@@ -201,6 +218,7 @@ export const AdminsManagementView = ({ showToast }: {
       }
 
       notify('계정이 성공적으로 삭제되었습니다.', 'success');
+      await loadData();
     } catch (err: any) {
       console.error("Delete error:", err);
       notify('삭제 중 오류가 발생했습니다: ' + err.message, 'error');
@@ -232,6 +250,7 @@ export const AdminsManagementView = ({ showToast }: {
 
       await Promise.all(deletePromises);
       notify('전체 초기화가 완료되었습니다.', 'success');
+      await loadData();
     } catch (err: any) {
       console.error("System init error:", err);
       notify('초기화 중 오류 발생: ' + err.message, 'error');
@@ -253,6 +272,14 @@ export const AdminsManagementView = ({ showToast }: {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={loadData}
+            disabled={isLoading}
+            className="flex items-center gap-2 px-4 py-3 bg-slate-50 text-slate-600 rounded-xl font-bold text-sm border border-slate-200 hover:bg-slate-100 transition-all disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+            새로고침
+          </button>
           <button
             onClick={handleSystemInitialize}
             disabled={isUpdating === 'system_init'}
@@ -366,7 +393,7 @@ export const AdminsManagementView = ({ showToast }: {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {usersLoading || credsLoading ? (
+                  {isLoading ? (
                     <tr>
                       <td colSpan={4} className="px-8 py-20 text-center">
                         <div className="flex flex-col items-center gap-3">

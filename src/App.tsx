@@ -120,6 +120,8 @@ const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
+  const appsCacheRef = useRef<{ data: any[]; ts: number } | null>(null);
+  const APPS_CACHE_TTL = 5 * 60 * 1000; // 5분 캐시 (읽기 할당량 절약)
   const [toasts, setToasts] = useState<Array<{id: string; message: string; type: 'success' | 'error' | 'info'}>>([]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -176,14 +178,21 @@ const Dashboard = () => {
     }
   };
 
-  const loadApplications = async () => {
+  const loadApplications = async (force = false) => {
     if (!user) return;
+    // 캐시 유효 시 Firestore 읽기 생략 (할당량 절약)
+    if (!force && appsCacheRef.current && Date.now() - appsCacheRef.current.ts < APPS_CACHE_TTL) {
+      setApplications(appsCacheRef.current.data);
+      return;
+    }
     setAppsLoading(true);
     setAppsError(null);
     try {
       const appsQuery = query(collection(db, 'applications'), orderBy('createdAt', 'desc'), limit(100));
       const snapshot = await getDocs(appsQuery);
-      setApplications(snapshot.docs.map(d => ({ id: d.id, ...d.data() as any })));
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() as any }));
+      appsCacheRef.current = { data, ts: Date.now() };
+      setApplications(data);
     } catch (err: any) {
       setAppsError(err);
     } finally {
@@ -654,6 +663,26 @@ const Dashboard = () => {
     let pdfUrls: string[] = [];
     let storagePaths: string[] = [];
     if (uploadedFiles.length > 0) {
+      // 파일 용량 및 개수 제한 (Firebase Storage 할당량 보호)
+      const MAX_FILE_SIZE = 5 * 1024 * 1024;   // 파일당 최대 5MB
+      const MAX_TOTAL_SIZE = 20 * 1024 * 1024; // 총합 최대 20MB
+      const MAX_FILES = 10;
+
+      if (uploadedFiles.length > MAX_FILES) {
+        setUploadError(`파일은 최대 ${MAX_FILES}개까지 업로드할 수 있습니다.`);
+        return;
+      }
+      const oversized = uploadedFiles.find(f => f.size > MAX_FILE_SIZE);
+      if (oversized) {
+        setUploadError(`파일 크기는 5MB를 초과할 수 없습니다: ${oversized.name}`);
+        return;
+      }
+      const totalSize = uploadedFiles.reduce((acc, f) => acc + f.size, 0);
+      if (totalSize > MAX_TOTAL_SIZE) {
+        setUploadError(`전체 파일 크기가 20MB를 초과합니다. 파일을 줄여주세요.`);
+        return;
+      }
+
       try {
         const uploadResults = await Promise.all(
           uploadedFiles.map(async (file, idx) => {
@@ -691,6 +720,7 @@ const Dashboard = () => {
 
     try {
       await applicationService.createApplication(finalApp);
+      appsCacheRef.current = null; // 캐시 무효화 — 새 신청서 즉시 반영
       setView('applications');
       setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' });
       setUploadedFiles([]);
@@ -720,6 +750,7 @@ const Dashboard = () => {
       }
 
       await applicationService.approveApplication(appId, adminId || user.uid);
+      appsCacheRef.current = null;
       setConfirmApproveId(null);
       showToast('신청서가 승인되었습니다.', 'success');
 
@@ -761,9 +792,11 @@ const Dashboard = () => {
       const currentApp = applications.find(a => a.id === appId);
       if (currentApp?.status === 'approved') {
         await applicationService.updateApplicationStatus(appId, 'pending');
+        appsCacheRef.current = null;
         showToast('승인이 취소되어 대기 상태로 변경되었습니다.', 'info');
       } else {
         await applicationService.rejectApplication(appId, adminId || user.uid);
+        appsCacheRef.current = null;
         showToast('반려 처리되었습니다.', 'success');
       }
 
@@ -795,6 +828,7 @@ const Dashboard = () => {
       setIsDeleting(true);
       console.log(`DEBUG: Starting performDeletion for ${appId}...`);
       await applicationService.deleteApplication(appId);
+      appsCacheRef.current = null;
       console.log(`DEBUG: Deletion of ${appId} successful.`);
       
       if (selectedApp?.id === appId) {

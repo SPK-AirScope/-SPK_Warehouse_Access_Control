@@ -70,12 +70,17 @@ export const AdminLoginPage = ({ onLogin, onError }: { onLogin: (adminId: string
 
       if (userCredential && userCredential.user) {
         try {
-          await setDoc(doc(db, 'users', userCredential.user.uid), {
-            name: name,
-            adminId: lowerId,
-            role: initialRole,
-            updatedAt: serverTimestamp()
-          }, { merge: true });
+          // 세션 내 중복 쓰기 방지 (Firestore 쓰기 할당량 절약)
+          const sessionKey = `profile_written_${userCredential.user.uid}`;
+          if (!sessionStorage.getItem(sessionKey)) {
+            await setDoc(doc(db, 'users', userCredential.user.uid), {
+              name: name,
+              adminId: lowerId,
+              role: initialRole,
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+            sessionStorage.setItem(sessionKey, '1');
+          }
 
           onLogin(lowerId);
         } catch (setErr: any) {
