@@ -101,7 +101,7 @@ export const pdfService = {
     }
   },
 
-  async stampUploadedPdf(pdfFile: File, stampSrc: string = '/1.JPG'): Promise<void> {
+  async stampUploadedPdf(pdfFile: File, stampSrc: string = '/1.JPG'): Promise<Uint8Array> {
     const { PDFDocument } = await import('pdf-lib');
 
     const pdfBytes = await pdfFile.arrayBuffer();
@@ -133,6 +133,7 @@ export const pdfService = {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    return modifiedBytes;
   },
 
   async generateApprovedPdf(app: EntryApplication, type: 'entry' | 'tools' = 'entry') {

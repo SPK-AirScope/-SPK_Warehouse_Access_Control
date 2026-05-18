@@ -58,6 +58,8 @@ export interface EntryApplication {
   rejectedBy?: string;
   pdfUrl?: string;
   pdfUrls?: string[];
+  stampedPdfUrls?: string[];
+  storagePaths?: string[];
   signatureImage?: string;
   applicantName?: string;
 }

@@ -26,7 +26,9 @@ import {
   Plus,
   Trash2,
   Info,
-  Menu
+  Menu,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 import { 
   useAuthState
@@ -114,6 +116,7 @@ const Dashboard = () => {
 
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [fileCategories, setFileCategories] = useState<Record<number, 'entry' | 'tools'>>({});
+  const [stampedFiles, setStampedFiles] = useState<Array<{bytes: Uint8Array; category: 'entry' | 'tools'; name: string}>>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isStamping, setIsStamping] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -206,6 +209,12 @@ const Dashboard = () => {
       runCleanupIfNeeded(adminId);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (user && view === 'calendar') {
+      loadApplications();
+    }
+  }, [view]);
 
   const handleAdminLogin = async (id: string) => {
     const lowerId = id.toLowerCase();
@@ -367,13 +376,15 @@ const Dashboard = () => {
 
     const nextMonth = () => setCurrentMonth(addMonths(currentDate, 1));
     const prevMonth = () => setCurrentMonth(subMonths(currentDate, 1));
+    const nextYear = () => setCurrentMonth(addMonths(currentDate, 12));
+    const prevYear = () => setCurrentMonth(addMonths(currentDate, -12));
 
-    // Normalize date strings to "yyyy-MM-dd" (handles Korean, ISO, slash formats)
+    // Normalize date strings to "yyyy-MM-dd" (handles Korean, ISO, slash, dot formats)
     const normalizeDate = (raw: any): string => {
       if (!raw) return '';
       const s = (typeof raw === 'string' ? raw : String(raw)).trim();
       if (!s) return '';
-      // Korean: "2026년 5월 17일"
+      // Korean: "2026년 5월 17일" (range "~" ignored — extract first date)
       const korean = s.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
       if (korean) {
         const [, y, m, d] = korean;
@@ -384,16 +395,22 @@ const Dashboard = () => {
       // Slash: "2026/05/17"
       const slash = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
       if (slash) return `${slash[1]}-${slash[2].padStart(2, '0')}-${slash[3].padStart(2, '0')}`;
+      // Dot: "2026.05.17"
+      const dot = s.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})/);
+      if (dot) return `${dot[1]}-${dot[2].padStart(2, '0')}-${dot[3].padStart(2, '0')}`;
       return '';
     };
 
     const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-    // Group apps by date (visitDate of first visitor preferred, else applyDate)
+    // Group apps by date:
+    // visitDate of first visitor is tried first; if it fails to normalize, fall back to applyDate
     const appsByDate: Record<string, EntryApplication[]> = {};
     applications.forEach(app => {
-      const raw = app.visitors?.[0]?.visitDate || app.applyDate;
-      const dateKey = normalizeDate(raw);
+      const normalizedVisit = normalizeDate(app.visitors?.[0]?.visitDate);
+      const dateKey = (normalizedVisit && ISO_RE.test(normalizedVisit))
+        ? normalizedVisit
+        : normalizeDate(app.applyDate);
       if (dateKey && ISO_RE.test(dateKey)) {
         if (!appsByDate[dateKey]) appsByDate[dateKey] = [];
         appsByDate[dateKey].push(app);
@@ -417,23 +434,39 @@ const Dashboard = () => {
           </div>
 
           <div className="flex items-center gap-1 md:gap-2 bg-white p-1 rounded-xl md:rounded-2xl border border-slate-200">
-            <button 
+            <button
+              onClick={prevYear}
+              className="p-2 md:p-2.5 hover:bg-slate-50 rounded-lg md:rounded-xl transition-all text-slate-400 hover:text-[#E30613]"
+              title="이전 해"
+            >
+              <ChevronsLeft size={18} />
+            </button>
+            <button
               onClick={prevMonth}
               className="p-2 md:p-2.5 hover:bg-slate-50 rounded-lg md:rounded-xl transition-all text-slate-400 hover:text-[#E30613]"
+              title="이전 달"
             >
               <ChevronLeft size={18} />
             </button>
-            <button 
+            <button
               onClick={() => setCurrentMonth(new Date())}
               className="px-3 md:px-4 py-1.5 md:py-2 text-[10px] md:text-[11px] font-black uppercase tracking-wider text-slate-600 hover:bg-slate-50 rounded-lg md:rounded-xl"
             >
               오늘
             </button>
-            <button 
+            <button
               onClick={nextMonth}
               className="p-2 md:p-2.5 hover:bg-slate-50 rounded-lg md:rounded-xl transition-all text-slate-400 hover:text-[#E30613]"
+              title="다음 달"
             >
               <ChevronRight size={18} />
+            </button>
+            <button
+              onClick={nextYear}
+              className="p-2 md:p-2.5 hover:bg-slate-50 rounded-lg md:rounded-xl transition-all text-slate-400 hover:text-[#E30613]"
+              title="다음 해"
+            >
+              <ChevronsRight size={18} />
             </button>
           </div>
         </div>
@@ -704,6 +737,29 @@ const Dashboard = () => {
       }
     }
 
+    let stampedPdfUrls: string[] = [];
+    if (stampedFiles.length > 0) {
+      try {
+        const stampedResults = await Promise.all(
+          stampedFiles.map(async (sf) => {
+            const path = `pdfs/${user.uid}/${Date.now()}_stamped_${sf.name}`;
+            const storageRef = ref(storage, path);
+            const snapshot = await uploadBytes(storageRef, sf.bytes, { contentType: 'application/pdf' });
+            const url = await getDownloadURL(snapshot.ref);
+            storagePaths.push(path);
+            return { url, category: sf.category };
+          })
+        );
+        const entryStamped = stampedResults.find(r => r.category === 'entry');
+        const toolsStamped = stampedResults.find(r => r.category === 'tools');
+        if (entryStamped) stampedPdfUrls[0] = entryStamped.url;
+        if (toolsStamped) stampedPdfUrls[1] = toolsStamped.url;
+      } catch (uploadErr) {
+        setUploadError('직인 PDF 업로드에 실패했습니다. 다시 시도해주세요.');
+        return;
+      }
+    }
+
     const finalApp: Omit<EntryApplication, 'id'> = {
       applyDate: new Date().toISOString().split('T')[0],
       visitors: newApp.visitors || [],
@@ -715,6 +771,7 @@ const Dashboard = () => {
       applicantName: newApp.applicantName || user.displayName || '',
       signatureImage: newApp.signatureImage || '',
       ...(pdfUrls.length > 0 && { pdfUrls }),
+      ...(stampedPdfUrls.length > 0 && { stampedPdfUrls }),
       ...(storagePaths.length > 0 && { storagePaths }),
     };
 
@@ -725,6 +782,7 @@ const Dashboard = () => {
       setView('applications');
       setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' });
       setUploadedFiles([]);
+      setStampedFiles([]);
     } catch (err: any) {
       console.error('신청서 제출 실패:', err);
       const msg = err?.message || String(err);
@@ -1106,43 +1164,75 @@ const Dashboard = () => {
                       )}
                     </div>
                   ) : detailViewMode === 'entry' ? (
-                    selectedApp.pdfUrls?.[0] ? (
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">업로드된 출입 신청서 (스캔본)</p>
-                          <a href={selectedApp.pdfUrls[0]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-[#E30613] hover:underline flex items-center gap-1">
-                            <Download size={11} /> 원본 다운로드
-                          </a>
+                    (() => {
+                      const stampedUrl = selectedApp.stampedPdfUrls?.[0];
+                      const originalUrl = selectedApp.pdfUrls?.[0];
+                      const displayUrl = stampedUrl || originalUrl;
+                      return displayUrl ? (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                              {stampedUrl ? '직인 출입 신청서' : '업로드된 출입 신청서 (스캔본)'}
+                            </p>
+                            <div className="flex items-center gap-3">
+                              {stampedUrl && (
+                                <a href={stampedUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-[#E30613] hover:underline flex items-center gap-1">
+                                  <Download size={11} /> 직인본 다운로드
+                                </a>
+                              )}
+                              {originalUrl && (
+                                <a href={originalUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-slate-500 hover:underline flex items-center gap-1">
+                                  <Download size={11} /> 원본 다운로드
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                          <iframe
+                            src={displayUrl}
+                            className="w-full rounded-2xl border border-slate-200 shadow-sm"
+                            style={{ height: '70vh' }}
+                            title="출입신청서"
+                          />
                         </div>
-                        <iframe
-                          src={selectedApp.pdfUrls[0]}
-                          className="w-full rounded-2xl border border-slate-200 shadow-sm"
-                          style={{ height: '70vh' }}
-                          title="출입신청서"
-                        />
-                      </div>
-                    ) : (
-                      <EntryDocument app={selectedApp} id="application-document" />
-                    )
+                      ) : (
+                        <EntryDocument app={selectedApp} id="application-document" />
+                      );
+                    })()
                   ) : (
-                    selectedApp.pdfUrls?.[1] ? (
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">업로드된 공구 반입 신청서 (스캔본)</p>
-                          <a href={selectedApp.pdfUrls[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-[#E30613] hover:underline flex items-center gap-1">
-                            <Download size={11} /> 원본 다운로드
-                          </a>
+                    (() => {
+                      const stampedUrl = selectedApp.stampedPdfUrls?.[1];
+                      const originalUrl = selectedApp.pdfUrls?.[1];
+                      const displayUrl = stampedUrl || originalUrl;
+                      return displayUrl ? (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                              {stampedUrl ? '직인 공구 반입 신청서' : '업로드된 공구 반입 신청서 (스캔본)'}
+                            </p>
+                            <div className="flex items-center gap-3">
+                              {stampedUrl && (
+                                <a href={stampedUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-[#E30613] hover:underline flex items-center gap-1">
+                                  <Download size={11} /> 직인본 다운로드
+                                </a>
+                              )}
+                              {originalUrl && (
+                                <a href={originalUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-slate-500 hover:underline flex items-center gap-1">
+                                  <Download size={11} /> 원본 다운로드
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                          <iframe
+                            src={displayUrl}
+                            className="w-full rounded-2xl border border-slate-200 shadow-sm"
+                            style={{ height: '70vh' }}
+                            title="공구반입신청서"
+                          />
                         </div>
-                        <iframe
-                          src={selectedApp.pdfUrls[1]}
-                          className="w-full rounded-2xl border border-slate-200 shadow-sm"
-                          style={{ height: '70vh' }}
-                          title="공구반입신청서"
-                        />
-                      </div>
-                    ) : (
-                      <ToolDocument app={selectedApp} id="tool-application-document" />
-                    )
+                      ) : (
+                        <ToolDocument app={selectedApp} id="tool-application-document" />
+                      );
+                    })()
                   )}
                 </div>
               </div>
@@ -1773,30 +1863,51 @@ const Dashboard = () => {
                               공구리스트
                             </button>
                           </div>
-                          <button
-                            disabled={isStamping}
-                            onClick={async () => {
-                              setIsStamping(true);
-                              try {
-                                await pdfService.stampUploadedPdf(file);
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              disabled={isStamping}
+                              onClick={async () => {
+                                setIsStamping(true);
+                                try {
+                                  const bytes = await pdfService.stampUploadedPdf(file);
+                                  setStampedFiles(prev => [...prev, {
+                                    bytes,
+                                    category: (fileCategories[idx] || 'entry') as 'entry' | 'tools',
+                                    name: file.name
+                                  }]);
+                                  setUploadedFiles(prev => prev.filter((_, i) => i !== idx));
+                                  setFileCategories(prev => {
+                                    const next = { ...prev };
+                                    delete next[idx];
+                                    return next;
+                                  });
+                                } catch (err) {
+                                  console.error('직인 적용 실패:', err);
+                                  showToast('직인 적용 중 오류가 발생했습니다.', 'error');
+                                } finally {
+                                  setIsStamping(false);
+                                }
+                              }}
+                              className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#E30613]/30 bg-red-50 hover:bg-red-100 text-[#E30613] text-xs font-black transition-colors disabled:opacity-50"
+                            >
+                              <Download size={13} />
+                              {isStamping ? '처리 중...' : '직인 다운로드'}
+                            </button>
+                            <button
+                              onClick={() => {
                                 setUploadedFiles(prev => prev.filter((_, i) => i !== idx));
                                 setFileCategories(prev => {
                                   const next = { ...prev };
                                   delete next[idx];
                                   return next;
                                 });
-                              } catch (err) {
-                                console.error('직인 적용 실패:', err);
-                                showToast('직인 적용 중 오류가 발생했습니다.', 'error');
-                              } finally {
-                                setIsStamping(false);
-                              }
-                            }}
-                            className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-[#E30613]/30 bg-red-50 hover:bg-red-100 text-[#E30613] text-xs font-black transition-colors disabled:opacity-50 shrink-0"
-                          >
-                            <Download size={13} />
-                            {isStamping ? '처리 중...' : '직인 다운로드'}
-                          </button>
+                              }}
+                              className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-red-50 hover:border-red-200 text-slate-400 hover:text-red-500 transition-colors"
+                              title="삭제"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
