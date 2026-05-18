@@ -721,6 +721,7 @@ const Dashboard = () => {
     try {
       await applicationService.createApplication(finalApp);
       appsCacheRef.current = null; // 캐시 무효화 — 새 신청서 즉시 반영
+      await loadApplications(true); // 달력·목록에 즉시 반영
       setView('applications');
       setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' });
       setUploadedFiles([]);
@@ -751,6 +752,7 @@ const Dashboard = () => {
 
       await applicationService.approveApplication(appId, adminId || user.uid);
       appsCacheRef.current = null;
+      await loadApplications(true);
       setConfirmApproveId(null);
       showToast('신청서가 승인되었습니다.', 'success');
 
@@ -793,10 +795,12 @@ const Dashboard = () => {
       if (currentApp?.status === 'approved') {
         await applicationService.updateApplicationStatus(appId, 'pending');
         appsCacheRef.current = null;
+        await loadApplications(true);
         showToast('승인이 취소되어 대기 상태로 변경되었습니다.', 'info');
       } else {
         await applicationService.rejectApplication(appId, adminId || user.uid);
         appsCacheRef.current = null;
+        await loadApplications(true);
         showToast('반려 처리되었습니다.', 'success');
       }
 
@@ -829,6 +833,7 @@ const Dashboard = () => {
       console.log(`DEBUG: Starting performDeletion for ${appId}...`);
       await applicationService.deleteApplication(appId);
       appsCacheRef.current = null;
+      await loadApplications(true);
       console.log(`DEBUG: Deletion of ${appId} successful.`);
       
       if (selectedApp?.id === appId) {
