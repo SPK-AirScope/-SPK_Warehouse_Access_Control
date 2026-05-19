@@ -804,20 +804,28 @@ const Dashboard = () => {
           });
 
           if (!uploadRes.ok) {
+            const text = await uploadRes.text();
             let errorDetail = 'Upload failed';
             let summary = '';
             try {
-              const errData = await uploadRes.json();
+              const errData = JSON.parse(text);
               errorDetail = errData.error || errorDetail;
               summary = errData.summary || '';
             } catch (e) {
-              errorDetail = uploadRes.statusText;
+              const looksLikeHtml = text.trim().startsWith('<');
+              errorDetail = looksLikeHtml ? `백엔드 서버 404/500 (HTML). Netlify와 같은 정적 호스팅에서는 백엔드가 작동하지 않습니다.` : text.slice(0, 50);
             }
             const finalDetail = summary ? `${errorDetail} (Summary: ${summary})` : errorDetail;
             throw new Error(`파일 업로드 실패 (${file.name}): ${finalDetail}`);
           }
 
-          const data = await uploadRes.json();
+          const resDataText = await uploadRes.text();
+          let data;
+          try {
+            data = JSON.parse(resDataText);
+          } catch (e) {
+            throw new Error(`업로드 응답이 올바르지 않습니다: ${resDataText.slice(0, 50)}`);
+          }
           uploadResults.push({ url: data.url, path: data.path, category: fileCategories[i] || 'entry' });
         }
         
@@ -853,20 +861,28 @@ const Dashboard = () => {
           });
 
           if (!uploadRes.ok) {
+            const text = await uploadRes.text();
             let errorDetail = 'Stamped upload failed';
             let summary = '';
             try {
-              const errData = await uploadRes.json();
+              const errData = JSON.parse(text);
               errorDetail = errData.error || errorDetail;
               summary = errData.summary || '';
             } catch (e) {
-              errorDetail = uploadRes.statusText;
+              const looksLikeHtml = text.trim().startsWith('<');
+              errorDetail = looksLikeHtml ? `백엔드 서버 응답 오류 (HTML).` : text.slice(0, 50);
             }
             const finalDetail = summary ? `${errorDetail} (Summary: ${summary})` : errorDetail;
             throw new Error(`승인 도장 파일 업로드 실패: ${finalDetail}`);
           }
 
-          const data = await uploadRes.json();
+          const resDataText = await uploadRes.text();
+          let data;
+          try {
+            data = JSON.parse(resDataText);
+          } catch (e) {
+            throw new Error(`응답 형식이 올바르지 않습니다.`);
+          }
           storagePaths.push(data.path);
           stampedPdfUrls.push(data.url);
         }
