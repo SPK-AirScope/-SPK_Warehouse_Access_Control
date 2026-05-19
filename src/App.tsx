@@ -721,7 +721,7 @@ const Dashboard = () => {
           uploadedFiles.map(async (file, idx) => {
             const path = `pdfs/${user.uid}/${Date.now()}_${file.name}`;
             const storageRef = ref(storage, path);
-            const snapshot = await uploadBytes(storageRef, file);
+            const snapshot = await uploadBytes(storageRef, file, { contentType: 'application/pdf' });
             const url = await getDownloadURL(snapshot.ref);
             return { url, path, category: fileCategories[idx] || 'entry' };
           })
