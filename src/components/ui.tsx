@@ -85,7 +85,7 @@ export const ApprovalSeal = ({ className, size = 'md', isPdf = false }: { classN
     <div className={cn("relative flex items-center justify-center overflow-hidden", sizes[size], className)}>
       {!imageError ? (
         <img
-          src="/1.JPG"
+          src="/seal.png"
           alt="직인"
           className={cn(
             "w-full h-full object-contain opacity-90",
@@ -95,12 +95,10 @@ export const ApprovalSeal = ({ className, size = 'md', isPdf = false }: { classN
           referrerPolicy="no-referrer"
         />
       ) : (
-        <div className="w-full h-full border-4 border-[#D30410] rounded-sm flex items-center justify-center p-1 bg-white/20">
-           <div className="w-full h-full border-2 border-[#D30410] flex flex-col items-center justify-center text-[#D30410] font-black leading-none">
-              <span className="text-[10px] scale-x-75">스위스포트</span>
-              <span className="text-[14px]">직인</span>
-              <span className="text-[10px] scale-x-75">코리아(주)</span>
-           </div>
+        <div className="w-full h-full border-4 border-[#D30410] flex flex-col items-center justify-center text-[#D30410] font-bold leading-tight p-1 bg-white/50">
+          <span className="text-[10px] scale-90">스위스포트</span>
+          <span className="text-sm">[직인]</span>
+          <span className="text-[9px] scale-75 whitespace-nowrap">대표이사 김일웅</span>
         </div>
       )}
     </div>

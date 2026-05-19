@@ -27,8 +27,10 @@ import {
   Trash2,
   Info,
   Menu,
+  RefreshCw,
   ChevronsLeft,
-  ChevronsRight
+  ChevronsRight,
+  ExternalLink
 } from 'lucide-react';
 import { 
   useAuthState
@@ -80,6 +82,7 @@ import { EntryDocument } from './components/EntryDocument';
 import { ToolDocument } from './components/ToolDocument';
 import { ProfileView } from './components/ProfileView';
 import { AdminsManagementView } from './components/AdminsManagementView';
+import WeatherWidget from './components/WeatherWidget';
 
 // Set worker for pdfjs
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -191,12 +194,31 @@ const Dashboard = () => {
     setAppsLoading(true);
     setAppsError(null);
     try {
-      const appsQuery = query(collection(db, 'applications'), orderBy('createdAt', 'desc'), limit(100));
-      const snapshot = await getDocs(appsQuery);
-      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() as any }));
+      console.log(`Loading applications (force=${force})...`);
+      let data: any[] = [];
+      try {
+        const appsQuery = query(collection(db, 'applications'), orderBy('createdAt', 'desc'), limit(100));
+        const snapshot = await getDocs(appsQuery);
+        data = snapshot.docs.map(d => ({ id: d.id, ...d.data() as any }));
+      } catch (indexError: any) {
+        console.warn("Ordered query failed (possibly missing index), falling back to unordered query:", indexError.message);
+        // Fallback to unordered query for new collections
+        const fallbackQuery = query(collection(db, 'applications'), limit(100));
+        const snapshot = await getDocs(fallbackQuery);
+        data = snapshot.docs.map(d => ({ id: d.id, ...d.data() as any }));
+        // Manual sort by createdAt if available
+        data.sort((a, b) => {
+          const timeA = a.createdAt?.seconds || 0;
+          const timeB = b.createdAt?.seconds || 0;
+          return timeB - timeA;
+        });
+      }
+      
       appsCacheRef.current = { data, ts: Date.now() };
       setApplications(data);
+      console.log(`Loaded ${data.length} applications.`);
     } catch (err: any) {
+      console.error("Critical Load Error:", err);
       setAppsError(err);
     } finally {
       setAppsLoading(false);
@@ -575,41 +597,41 @@ const Dashboard = () => {
     console.log("Starting batch processing for", files.length, "files");
     
     try {
-      const results = await Promise.all(
-        Array.from(files).map(async (file: File) => {
-          console.log(`Processing file: ${file.name} (${file.size} bytes)`);
-          return new Promise<{ visitors: any[], tools: any[], escorts: any[], signatureImage?: string, applicantName?: string }>((resolve, reject) => {
-            const mimeType = file.type || "application/pdf";
-            const reader = new FileReader();
-            
-            // Set a safety timeout for file reading
-            const timeoutId = setTimeout(() => {
-              reject(new Error(`File read timeout for ${file.name}`));
-            }, 30000);
+      const results: any[] = [];
+      const fileArray = Array.from(files);
+      
+      for (const file of fileArray) {
+        console.log(`Processing file: ${file.name} (${file.size} bytes)`);
+        const result = await new Promise<{ visitors: any[], tools: any[], escorts: any[], signatureImage?: string, applicantName?: string }>((resolve, reject) => {
+          const mimeType = file.type || "application/pdf";
+          const reader = new FileReader();
+          
+          const timeoutId = setTimeout(() => {
+            reject(new Error(`File read timeout for ${file.name}`));
+          }, 30000);
 
-            reader.readAsDataURL(file);
-            reader.onload = async () => {
-              clearTimeout(timeoutId);
-              try {
-                const base64Data = (reader.result as string).split(',')[1];
-                
-                console.log(`Sending ${file.name} to AI...`);
-                const result = await aiService.analyzeApplicationPdf(base64Data, mimeType);
-                resolve({ ...result });
-              } catch (err) {
-                console.error(`AI analysis failed for ${file.name}:`, err);
-                reject(err);
-              }
-            };
-            reader.onerror = () => {
-              clearTimeout(timeoutId);
-              reject(new Error(`File read error for ${file.name}`));
-            };
-          });
-        })
-      );
+          reader.readAsDataURL(file);
+          reader.onload = async () => {
+            clearTimeout(timeoutId);
+            try {
+              const base64Data = (reader.result as string).split(',')[1];
+              console.log(`Sending ${file.name} to AI...`);
+              const result = await aiService.analyzeApplicationPdf(base64Data, mimeType);
+              resolve({ ...result });
+            } catch (err) {
+              console.error(`AI analysis failed for ${file.name}:`, err);
+              reject(err);
+            }
+          };
+          reader.onerror = () => {
+            clearTimeout(timeoutId);
+            reject(new Error(`File read error for ${file.name}`));
+          };
+        });
+        results.push(result);
+      }
 
-      console.log("All files analyzed. Merging results...");
+      console.log("All files sequential analysis complete. Merging results...");
 
       // Merge all results
       setNewApp(prev => {
@@ -639,10 +661,22 @@ const Dashboard = () => {
 
     } catch (err: any) {
       console.error("Processing Error:", err);
-      if (err.message?.includes("timeout")) {
+      let errorMsg = err.message || "";
+      
+      // Clean up technical error messages
+      if (errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
+        showToast("AI 분석 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요. (무료 티어 제한)", 'error');
+      } else if (errorMsg.includes("timeout")) {
         showToast("분석 시간이 너무 오래 걸립니다. 파일 용량을 줄이거나 다시 시도해주세요.", 'error');
       } else {
-        showToast("신청서 분석 중 오류가 발생했습니다. 파일 형식을 확인해주세요.", 'error');
+        // Handle common Swissport specific failures or generic AI failures
+        const detail = err.detail ? `: ${err.detail}` : "";
+        
+        if (errorMsg.length > 100) {
+          errorMsg = "AI 분석 중 일시적인 오류가 발생했습니다.";
+        }
+        
+        showToast(`분석 실패${detail || ': ' + errorMsg}`, 'error');
       }
     } finally {
       setIsAnalyzing(false);
@@ -651,7 +685,9 @@ const Dashboard = () => {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
+      const files = Array.from(e.target.files).filter((f: any) => 
+        f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+      ) as File[];
       if (files.length > 0) {
         setUploadedFiles(files);
         const cats: Record<number, 'entry' | 'tools'> = {};
@@ -668,7 +704,9 @@ const Dashboard = () => {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+      const files = Array.from(e.dataTransfer.files).filter((f: any) => 
+        f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+      ) as File[];
       if (files.length > 0) {
         setUploadedFiles(files);
         const cats: Record<number, 'entry' | 'tools'> = {};
@@ -691,108 +729,199 @@ const Dashboard = () => {
   };
 
   const submitApplication = async () => {
-    if (!user) return;
-
-    let pdfUrls: string[] = [];
-    let storagePaths: string[] = [];
-    if (uploadedFiles.length > 0) {
-      // 파일 용량 및 개수 제한 (Firebase Storage 할당량 보호)
-      const MAX_FILE_SIZE = 5 * 1024 * 1024;   // 파일당 최대 5MB
-      const MAX_TOTAL_SIZE = 20 * 1024 * 1024; // 총합 최대 20MB
-      const MAX_FILES = 10;
-
-      if (uploadedFiles.length > MAX_FILES) {
-        setUploadError(`파일은 최대 ${MAX_FILES}개까지 업로드할 수 있습니다.`);
-        return;
-      }
-      const oversized = uploadedFiles.find(f => f.size > MAX_FILE_SIZE);
-      if (oversized) {
-        setUploadError(`파일 크기는 5MB를 초과할 수 없습니다: ${oversized.name}`);
-        return;
-      }
-      const totalSize = uploadedFiles.reduce((acc, f) => acc + f.size, 0);
-      if (totalSize > MAX_TOTAL_SIZE) {
-        setUploadError(`전체 파일 크기가 20MB를 초과합니다. 파일을 줄여주세요.`);
-        return;
-      }
-
-      try {
-        const uploadResults = await Promise.all(
-          uploadedFiles.map(async (file, idx) => {
-            const path = `pdfs/${user.uid}/${Date.now()}_${file.name}`;
-            const storageRef = ref(storage, path);
-            const snapshot = await uploadBytes(storageRef, file, { contentType: 'application/pdf' });
-            const url = await getDownloadURL(snapshot.ref);
-            return { url, path, category: fileCategories[idx] || 'entry' };
-          })
-        );
-        const entryResult = uploadResults.find(r => r.category === 'entry');
-        const toolsResult = uploadResults.find(r => r.category === 'tools');
-        if (entryResult) pdfUrls[0] = entryResult.url;
-        if (toolsResult) pdfUrls[1] = toolsResult.url;
-        storagePaths = uploadResults.map(r => r.path);
-      } catch (uploadErr) {
-        setUploadError('PDF 파일 업로드에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.');
-        return;
-      }
+    if (!user) {
+      console.error("Submit: No user authenticated");
+      return;
     }
 
-    let stampedPdfUrls: string[] = [];
-    if (stampedFiles.length > 0) {
-      try {
-        const stampedResults = await Promise.all(
-          stampedFiles.map(async (sf) => {
-            const path = `pdfs/${user.uid}/${Date.now()}_stamped_${sf.name}`;
-            const storageRef = ref(storage, path);
-            const snapshot = await uploadBytes(storageRef, sf.bytes, { contentType: 'application/pdf' });
-            const url = await getDownloadURL(snapshot.ref);
-            storagePaths.push(path);
-            return { url, category: sf.category };
-          })
-        );
-        const entryStamped = stampedResults.find(r => r.category === 'entry');
-        const toolsStamped = stampedResults.find(r => r.category === 'tools');
-        if (entryStamped) stampedPdfUrls[0] = entryStamped.url;
-        if (toolsStamped) stampedPdfUrls[1] = toolsStamped.url;
-      } catch (uploadErr) {
-        setUploadError('직인 PDF 업로드에 실패했습니다. 다시 시도해주세요.');
-        return;
-      }
+    if (isProcessing) return;
+
+    // Check if there's anything to submit
+    const hasData = (newApp.visitors?.length || 0) > 0 || (newApp.tools?.length || 0) > 0 || (newApp.escorts?.length || 0) > 0;
+    const hasFiles = uploadedFiles.length > 0 || stampedFiles.length > 0;
+
+    if (!hasData && !hasFiles) {
+      showToast('제출할 데이터나 파일이 없습니다.', 'error');
+      return;
     }
 
-    const finalApp: Omit<EntryApplication, 'id'> = {
-      applyDate: new Date().toISOString().split('T')[0],
-      visitors: newApp.visitors || [],
-      tools: newApp.tools || [],
-      escorts: newApp.escorts || [],
-      status: 'pending',
-      applicantId: user.uid,
-      applicantEmail: user.email || '',
-      applicantName: newApp.applicantName || user.displayName || '',
-      signatureImage: newApp.signatureImage || '',
-      ...(pdfUrls.length > 0 && { pdfUrls }),
-      ...(stampedPdfUrls.length > 0 && { stampedPdfUrls }),
-      ...(storagePaths.length > 0 && { storagePaths }),
-    };
+    setIsProcessing(true);
+    console.log("Submit: Starting application submission process...");
 
     try {
+      let pdfUrls: string[] = [];
+      let storagePaths: string[] = [];
+      
+      if (uploadedFiles.length > 0) {
+        console.log(`Submit: Uploading ${uploadedFiles.length} files...`);
+        // 파일 용량 및 개수 제한 (Firebase Storage 할당량 보호)
+        const MAX_FILE_SIZE = 10 * 1024 * 1024;   // 10MB per file
+        const MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 100MB total
+        const MAX_FILES = 50;                     // 50 files max
+
+        if (uploadedFiles.length > MAX_FILES) {
+          setUploadError(`파일은 최대 ${MAX_FILES}개까지 업로드할 수 있습니다.`);
+          setIsProcessing(false);
+          return;
+        }
+        const oversized = uploadedFiles.find(f => f.size > MAX_FILE_SIZE);
+        if (oversized) {
+          setUploadError(`파일 크기는 5MB를 초과할 수 없습니다: ${oversized.name}`);
+          setIsProcessing(false);
+          return;
+        }
+        const totalSize = uploadedFiles.reduce((acc, f) => acc + f.size, 0);
+        if (totalSize > MAX_TOTAL_SIZE) {
+          setUploadError(`전체 파일 크기가 20MB를 초과합니다. 파일을 줄여주세요.`);
+          setIsProcessing(false);
+          return;
+        }
+
+        const uploadResults = [];
+        for (let i = 0; i < uploadedFiles.length; i++) {
+          const file = uploadedFiles[i];
+          const randomId = Math.random().toString(36).substring(2, 7);
+          const path = `pdfs/${user.uid}/${Date.now()}_${i}_${randomId}_${file.name}`;
+          
+          console.log(`Uploading file ${i + 1}/${uploadedFiles.length}: ${file.name} via proxy`);
+          
+          // Read file as base64
+          const base64Data = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve((reader.result as string).split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+
+          const uploadRes = await fetch('/api/storage/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              base64Data,
+              path,
+              contentType: 'application/pdf'
+            })
+          });
+
+          if (!uploadRes.ok) {
+            let errorDetail = 'Upload failed';
+            let summary = '';
+            try {
+              const errData = await uploadRes.json();
+              errorDetail = errData.error || errorDetail;
+              summary = errData.summary || '';
+            } catch (e) {
+              errorDetail = uploadRes.statusText;
+            }
+            const finalDetail = summary ? `${errorDetail} (Summary: ${summary})` : errorDetail;
+            throw new Error(`파일 업로드 실패 (${file.name}): ${finalDetail}`);
+          }
+
+          const data = await uploadRes.json();
+          uploadResults.push({ url: data.url, path: data.path, category: fileCategories[i] || 'entry' });
+        }
+        
+        pdfUrls = uploadResults.map(r => r.url);
+        storagePaths = uploadResults.map(r => r.path);
+        console.log("Submit: All files uploaded successfully.");
+      }
+
+      let stampedPdfUrls: string[] = [];
+      if (stampedFiles.length > 0) {
+        console.log(`Submit: Uploading ${stampedFiles.length} stamped files via proxy...`);
+        for (let i = 0; i < stampedFiles.length; i++) {
+          const sf = stampedFiles[i];
+          const randomId = Math.random().toString(36).substring(2, 7);
+          const path = `pdfs/${user.uid}/${Date.now()}_stamped_${i}_${randomId}_${sf.name}`;
+          
+          // Convert Uint8Array to base64
+          let binary = '';
+          const len = sf.bytes.byteLength;
+          for (let j = 0; j < len; j++) {
+            binary += String.fromCharCode(sf.bytes[j]);
+          }
+          const base64Data = window.btoa(binary);
+
+          const uploadRes = await fetch('/api/storage/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              base64Data,
+              path,
+              contentType: 'application/pdf'
+            })
+          });
+
+          if (!uploadRes.ok) {
+            let errorDetail = 'Stamped upload failed';
+            let summary = '';
+            try {
+              const errData = await uploadRes.json();
+              errorDetail = errData.error || errorDetail;
+              summary = errData.summary || '';
+            } catch (e) {
+              errorDetail = uploadRes.statusText;
+            }
+            const finalDetail = summary ? `${errorDetail} (Summary: ${summary})` : errorDetail;
+            throw new Error(`승인 도장 파일 업로드 실패: ${finalDetail}`);
+          }
+
+          const data = await uploadRes.json();
+          storagePaths.push(data.path);
+          stampedPdfUrls.push(data.url);
+        }
+        console.log("Submit: Stamped files uploaded successfully.");
+      }
+
+      const finalApp: Omit<EntryApplication, 'id'> = {
+        applyDate: new Date().toISOString().split('T')[0],
+        visitors: newApp.visitors || [],
+        tools: newApp.tools || [],
+        escorts: newApp.escorts || [],
+        status: 'pending',
+        applicantId: user.uid,
+        applicantEmail: user.email || '',
+        applicantName: newApp.applicantName || user.displayName || '',
+        signatureImage: newApp.signatureImage || '',
+        ...(pdfUrls.length > 0 && { pdfUrls: pdfUrls.filter(Boolean) as string[] }),
+        ...(stampedPdfUrls.length > 0 && { stampedPdfUrls: stampedPdfUrls.filter(Boolean) as string[] }),
+        ...(storagePaths.length > 0 && { storagePaths }),
+      };
+
+      console.log("Submit: Creating Firestore document...");
       await applicationService.createApplication(finalApp);
-      appsCacheRef.current = null; // 캐시 무효화 — 새 신청서 즉시 반영
-      await loadApplications(true); // 달력·목록에 즉시 반영
-      setView('applications');
-      setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' });
+      console.log("Submit: Firestore document created.");
+      
+      // Cleanup submission state before switching view
       setUploadedFiles([]);
       setStampedFiles([]);
+      setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' });
+      appsCacheRef.current = null;
+      
+      showToast('신청서가 성공적으로 제출되었습니다.', 'success');
+      
+      // Navigate to applications view
+      console.log("Submit: Redirecting to applications view.");
+      setView('applications');
+      
+      // Refresh the list immediately and then again after a short delay for eventual consistency
+      await loadApplications(true);
+      setTimeout(() => loadApplications(true), 2000);
+      
     } catch (err: any) {
       console.error('신청서 제출 실패:', err);
       const msg = err?.message || String(err);
+      
       if (msg.includes('permission-denied') || msg.includes('insufficient permissions')) {
         showToast('제출 권한이 없습니다. 관리자에게 문의하세요.', 'error');
       } else {
-        showToast('제출에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.', 'error');
+        showToast(`제출 실패: ${msg}`, 'error');
       }
+    } finally {
+      setIsProcessing(false);
     }
   };
+
 
   const handleApprove = (appId: string) => {
     if (!appId) return;
@@ -1057,11 +1186,10 @@ const Dashboard = () => {
 
                 <div className="w-full md:w-auto overflow-x-auto no-scrollbar">
                   <div className="flex bg-white p-1 rounded-xl border border-slate-200 min-w-max">
-                     {[
-                       { id: 'summary', label: '요약', icon: LayoutGrid },
-                       { id: 'entry', label: '신청서', icon: FileText },
-                       { id: 'tools', label: '공구목록', icon: Wrench },
-                     ].map((tab) => (
+                    {[
+                      { id: 'entry', label: '신청서', icon: FileText },
+                      { id: 'tools', label: '공구목록', icon: Wrench },
+                    ].map((tab) => (
                        <button
                          key={tab.id}
                          onClick={() => setDetailViewMode(tab.id as any)}
@@ -1087,83 +1215,7 @@ const Dashboard = () => {
               {/* Modal Content - Scrollable */}
               <div className="flex-1 overflow-y-auto p-4 md:p-10 bg-slate-100/50">
                 <div className="max-w-4xl mx-auto space-y-12">
-                  {detailViewMode === 'summary' ? (
-                    <div className="space-y-12">
-                      {/* Summary Section (Existing modern style) */}
-                      <div className="border-[3px] border-[#1A1A1A] p-8 relative overflow-hidden bg-white">
-                        <div className="absolute top-0 right-0 p-4 border-l-2 border-b-2 border-[#1A1A1A] bg-slate-50">
-                           <p className="text-[9px] font-black text-center mb-1">보안 확인</p>
-                           <div className="w-16 h-16 border border-dashed border-slate-300 rounded flex items-center justify-center">
-                              {selectedApp.status === 'approved' ? (
-                                <ApprovalSeal size="sm" className="rotate-[-12deg]" />
-                              ) : (
-                                <span className="text-[8px] text-slate-300">STAMP</span>
-                              )}
-                           </div>
-                        </div>
-                        
-                        <h3 className="text-2xl font-black text-center mb-10 tracking-widest uppercase italic">Warehouse Entry Permit</h3>
-                        
-                        <div className="grid grid-cols-2 md:grid-cols-4 border-2 border-[#1A1A1A] text-xs">
-                           <div className="bg-slate-100 p-2 md:p-3 font-black border-r-2 border-[#1A1A1A] flex items-center">신청구분</div>
-                           <div className="p-2 md:p-3 border-r-0 md:border-r-2 border-[#1A1A1A] flex items-center font-bold">임시출입 (공구포함)</div>
-                           <div className="bg-slate-100 p-2 md:p-3 font-black border-r-2 border-t-2 md:border-t-0 border-[#1A1A1A] flex items-center">신청일자</div>
-                           <div className="p-2 md:p-3 border-t-2 md:border-t-0 flex items-center font-bold">{selectedApp.applyDate}</div>
-
-                           <div className="bg-slate-100 p-2 md:p-3 font-black border-t-2 border-r-2 border-[#1A1A1A] flex items-center">방문업체</div>
-                           <div className="p-2 md:p-3 border-t-2 border-r-0 md:border-r-2 border-[#1A1A1A] flex items-center font-bold">{selectedApp.visitors?.[0]?.company || '-'}</div>
-                           <div className="bg-slate-100 p-2 md:p-3 font-black border-t-2 border-r-2 border-[#1A1A1A] flex items-center">방문인원</div>
-                           <div className="p-2 md:p-3 border-t-2 flex items-center font-bold">{selectedApp.visitors?.length || 0} 명</div>
-                        </div>
-                      </div>
-
-                      {/* Visitors Detail */}
-                      {selectedApp.visitors && selectedApp.visitors.length > 0 && (
-                        <div className="space-y-6">
-                          <div className="flex items-center gap-2 border-l-4 border-[#E30613] pl-4">
-                            <h4 className="text-sm font-black text-[#1A1A1A] uppercase tracking-wider">방문자 명단 및 상세정보</h4>
-                          </div>
-                          <div className="grid grid-cols-1 gap-4">
-                            {selectedApp.visitors.map((v, i) => (
-                              <div key={i} className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
-                                 <div className="flex items-center gap-4 mb-4 pb-4 border-b border-slate-200/50">
-                                    <div className="w-8 h-8 bg-[#1A1A1A] rounded-lg text-white font-black text-xs flex items-center justify-center">{i+1}</div>
-                                    <p className="font-black text-lg text-[#1A1A1A]">{v.name}</p>
-                                    <span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded border border-slate-100">{v.company}</span>
-                                 </div>
-                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[11px]">
-                                    <div>
-                                      <p className="text-slate-400 font-bold mb-0.5">생년월일</p>
-                                      <p className="font-bold text-slate-700">{v.birthDate || '-'}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-slate-400 font-bold mb-0.5">연락처</p>
-                                      <p className="font-bold text-slate-700">{v.phone || '-'}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-slate-400 font-bold mb-0.5">출입증구분</p>
-                                      <p className="font-black text-[#E30613]">{v.badgeType || '-'}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-slate-400 font-bold mb-0.5">허가구역</p>
-                                      <p className="font-bold text-slate-700">{v.accessZone || '-'}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-slate-400 font-bold mb-0.5">방문목적</p>
-                                      <p className="font-bold text-slate-700">{v.purpose || '-'}</p>
-                                    </div>
-                                    <div className="col-span-2">
-                                      <p className="text-slate-400 font-bold mb-0.5">비고</p>
-                                      <p className="text-slate-600 italic">{v.remarks || '-'}</p>
-                                    </div>
-                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : detailViewMode === 'entry' ? (
+                  {detailViewMode === 'entry' ? (
                     (() => {
                       const stampedUrl = selectedApp.stampedPdfUrls?.[0];
                       const originalUrl = selectedApp.pdfUrls?.[0];
@@ -1174,15 +1226,15 @@ const Dashboard = () => {
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                               {stampedUrl ? '직인 출입 신청서' : '업로드된 출입 신청서 (스캔본)'}
                             </p>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2">
                               {stampedUrl && (
-                                <a href={stampedUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-[#E30613] hover:underline flex items-center gap-1">
-                                  <Download size={11} /> 직인본 다운로드
+                                <a href={stampedUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-white bg-[#E30613] px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-sm hover:bg-[#c40410] transition-colors">
+                                  <ExternalLink size={12} /> 새 창에서 직인본 열기
                                 </a>
                               )}
                               {originalUrl && (
-                                <a href={originalUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-slate-500 hover:underline flex items-center gap-1">
-                                  <Download size={11} /> 원본 다운로드
+                                <a href={originalUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-slate-500 bg-white border border-slate-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 transition-colors">
+                                  <ExternalLink size={12} /> 원본 보기
                                 </a>
                               )}
                             </div>
@@ -1209,15 +1261,15 @@ const Dashboard = () => {
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                               {stampedUrl ? '직인 공구 반입 신청서' : '업로드된 공구 반입 신청서 (스캔본)'}
                             </p>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2">
                               {stampedUrl && (
-                                <a href={stampedUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-[#E30613] hover:underline flex items-center gap-1">
-                                  <Download size={11} /> 직인본 다운로드
+                                <a href={stampedUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-white bg-[#E30613] px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-sm hover:bg-[#c40410] transition-colors">
+                                  <ExternalLink size={12} /> 새 창에서 직인본 열기
                                 </a>
                               )}
                               {originalUrl && (
-                                <a href={originalUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-slate-500 hover:underline flex items-center gap-1">
-                                  <Download size={11} /> 원본 다운로드
+                                <a href={originalUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-slate-500 bg-white border border-slate-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 hover:bg-slate-50 transition-colors">
+                                  <ExternalLink size={12} /> 원본 보기
                                 </a>
                               )}
                             </div>
@@ -1240,23 +1292,59 @@ const Dashboard = () => {
               {/* Modal Footer */}
               <div className="p-8 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3 rounded-b-[2.5rem]">
                  {/* PDF Download — left-aligned */}
-                 <Button
-                   variant="outline"
-                   className="px-6 h-12 flex items-center gap-2 mr-auto bg-white border-slate-200 text-slate-700"
-                   onClick={async () => {
-                     if (!selectedApp) return;
-                     const name = selectedApp.visitors?.[0]?.name || 'application';
-                     const date = selectedApp.applyDate || format(new Date(), 'yyyy-MM-dd');
-                     if (detailViewMode === 'tools') {
-                       await pdfService.downloadElementAsPdf('tool-application-document', `공구반입신청서_${name}_${date}.pdf`);
-                     } else {
-                       await pdfService.downloadElementAsPdf('application-document', `출입신청서_${name}_${date}.pdf`);
-                     }
-                   }}
-                 >
-                   <Download size={16} />
-                   PDF 다운로드
-                 </Button>
+                 <div className="mr-auto flex flex-wrap gap-2">
+                   {selectedApp?.stampedPdfUrls?.[0] && (
+                     <Button
+                       variant="outline"
+                       className="px-4 h-10 flex items-center gap-2 bg-white border-red-100 text-red-600 shadow-sm text-[11px] font-black"
+                       onClick={() => window.open(selectedApp.stampedPdfUrls[0], '_blank')}
+                     >
+                       <Download size={14} />
+                       신청서 직인본 다운로드
+                     </Button>
+                   )}
+                   {selectedApp?.stampedPdfUrls?.[1] && (
+                     <Button
+                       variant="outline"
+                       className="px-4 h-10 flex items-center gap-2 bg-white border-red-100 text-red-600 shadow-sm text-[11px] font-black"
+                       onClick={() => window.open(selectedApp.stampedPdfUrls[1], '_blank')}
+                     >
+                       <Download size={14} />
+                       직인본 공구목록 다운로드
+                     </Button>
+                   )}
+                    {(!selectedApp?.stampedPdfUrls?.[0] || !selectedApp?.stampedPdfUrls?.[1]) && (
+                      <Button
+                        variant="outline"
+                        className="px-4 h-10 flex items-center gap-2 bg-white border-slate-200 text-slate-700 shadow-sm text-[11px] font-black"
+                        onClick={async () => {
+                          if (!selectedApp) return;
+                          
+                          const name = selectedApp.visitors?.[0]?.name || 'application';
+                          const date = selectedApp.applyDate || format(new Date(), 'yyyy-MM-dd');
+                          
+                          if (detailViewMode === 'tools') {
+                            const originalUrl = selectedApp.pdfUrls?.[1];
+                            if (originalUrl) {
+                              window.open(originalUrl, '_blank');
+                            } else {
+                              await pdfService.downloadElementAsPdf('tool-application-document', `공구반입신청서_${name}_${date}.pdf`);
+                            }
+                          } else {
+                            const originalUrl = selectedApp.pdfUrls?.[0];
+                            if (originalUrl) {
+                              window.open(originalUrl, '_blank');
+                            } else {
+                              await pdfService.downloadElementAsPdf('application-document', `출입신청서_${name}_${date}.pdf`);
+                            }
+                          }
+                        }}
+                      >
+                        <Download size={14} />
+                        PDF 다운로드
+                      </Button>
+                    )}
+                 </div>
 
                  <Button variant="outline" className="px-8 min-w-32 h-12 bg-white" onClick={() => setSelectedApp(null)}>
                     닫기
@@ -1339,7 +1427,7 @@ const Dashboard = () => {
           <p className="text-[10px] font-black text-[#E30613] uppercase tracking-[0.25em] mt-4">Warehouse Access Control</p>
         </div>
 
-        <nav className="flex-1 py-4 px-6 space-y-1.5">
+        <nav className="flex-1 py-4 px-6 space-y-1.5 flex flex-col">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 px-4">Navigation &bull; {roleLabel}</p>
           <button 
             onClick={() => { setView('calendar'); setIsSidebarOpen(false); }}
@@ -1390,6 +1478,9 @@ const Dashboard = () => {
               </button>
             </div>
           )}
+
+          <div className="flex-1" />
+          <WeatherWidget />
         </nav>
 
         <div className="p-8">
@@ -1581,6 +1672,31 @@ const Dashboard = () => {
                 animate={{ opacity: 1, y: 0 }}
                 className="space-y-6 max-w-6xl mx-auto"
               >
+                {/* Stats Summary */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                  <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">전체 신청</p>
+                    <p className="text-2xl font-black text-[#1A1A1A]">{applications.length}</p>
+                  </div>
+                  <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+                    <p className="text-[10px] font-black text-orange-400 uppercase tracking-widest mb-1">승인 대기</p>
+                    <p className="text-2xl font-black text-orange-500">{applications.filter(a => a.status === 'pending').length}</p>
+                  </div>
+                  <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">오늘 신청</p>
+                    <p className="text-2xl font-black text-emerald-600">
+                      {applications.filter(a => {
+                        const dateStr = a.createdAt?.seconds ? format(new Date(a.createdAt.seconds * 1000), 'yyyy-MM-dd') : '';
+                        return dateStr === format(new Date(), 'yyyy-MM-dd');
+                      }).length}
+                    </p>
+                  </div>
+                  <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">반려 항목</p>
+                    <p className="text-2xl font-black text-blue-600">{applications.filter(a => a.status === 'rejected').length}</p>
+                  </div>
+                </div>
+
                 <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-6 mb-8 mt-2">
                    <div className="relative w-full md:w-96 group order-2 md:order-1">
                       <Search size={16} className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#E30613] transition-colors" />
@@ -1591,17 +1707,18 @@ const Dashboard = () => {
                         className="w-full pl-12 pr-6 py-4 md:py-3.5 bg-white border border-slate-200 rounded-xl text-sm font-bold shadow-sm outline-none transition-all ring-1 ring-slate-200 focus:ring-2 focus:ring-[#E30613]/20"
                       />
                    </div>
-                   {canWriteData && (
-                     <div className="flex gap-2 order-1 md:order-2">
-                        <Button variant="outline" className="flex-1 md:flex-none px-5 border-none shadow-sm ring-1 ring-slate-200 text-xs" onClick={() => setSearchQuery('')}>
-                           초기화
-                        </Button>
+                   <div className="flex gap-2 order-1 md:order-2">
+                      <Button variant="outline" className="flex-1 md:flex-none px-4 border-none shadow-sm ring-1 ring-slate-200 text-xs flex items-center justify-center gap-2" onClick={() => loadApplications(true)} disabled={appsLoading}>
+                         <RefreshCw size={14} className={appsLoading ? "animate-spin" : ""} />
+                         <span className="hidden sm:inline">새로고침</span>
+                      </Button>
+                      {canWriteData && (
                         <Button variant="primary" onClick={() => setView('create')} className="flex-1 md:flex-none px-6 text-xs">
                            <FilePlus size={16} />
                            신규 신청
                         </Button>
-                     </div>
-                   )}
+                      )}
+                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3">
@@ -1696,7 +1813,7 @@ const Dashboard = () => {
                                </button>
                              )}
                              <button 
-                                onClick={() => { setSelectedApp(app); setDetailViewMode('summary'); }}
+                                onClick={() => { setSelectedApp(app); setDetailViewMode('entry'); }}
                                 className="p-2.5 text-slate-400 hover:text-[#E30613] hover:bg-slate-50 transition-colors rounded-lg"
                              >
                                 <Eye size={16} />
@@ -2229,10 +2346,10 @@ const Dashboard = () => {
                        </div>
 
                        <div className="pt-8 flex gap-3">
-                          <Button variant="outline" className="flex-1 py-4 h-14 bg-white ring-1 ring-slate-200 border-none" onClick={() => setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' })}>다시 작성</Button>
-                          <Button variant="primary" className="flex-[3] py-4 h-14 shadow-2xl shadow-red-500/20" onClick={submitApplication}>
-                             신청서 일괄 업로드
-                             <ArrowRight size={18} />
+                          <Button variant="outline" className="flex-1 py-4 h-14 bg-white ring-1 ring-slate-200 border-none" onClick={() => setNewApp({ visitors: [], tools: [], escorts: [], status: 'pending' })} disabled={isProcessing}>다시 작성</Button>
+                          <Button variant="primary" className="flex-[3] py-4 h-14 shadow-2xl shadow-red-500/20" onClick={submitApplication} disabled={isProcessing || isAnalyzing}>
+                             {isProcessing ? '신청서 제출 중...' : '신청서 일괄 업로드'}
+                             {!isProcessing && <ArrowRight size={18} />}
                           </Button>
                        </div>
                     </motion.div>

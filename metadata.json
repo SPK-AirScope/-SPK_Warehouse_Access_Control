@@ -2,5 +2,5 @@
   "name": "SPK Warehouse Access Control",
   "description": "Warehouse access management system for Swissport Korea, including entry/exit tracking, visitor management, and security control.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
